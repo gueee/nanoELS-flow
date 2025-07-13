@@ -87,6 +87,7 @@ void updateDisplay();
 void processMovement();
 void testMotionControl();  // Testing function for motion control
 void initializeWebInterface();  // Web interface initialization
+void testRoutine(); // New test routine function
 
 void setup() {
   Serial.begin(115200);
@@ -109,6 +110,7 @@ void setup() {
   Serial.println("Initializing Nextion display...");
   nextionDisplay.initialize();
   nextionDisplay.showInitProgress("Motion control...");
+  delay(1000); // Give the display time to finish booting
   
   // Skip motion control tests during startup to avoid hang
   // Uncomment this line after verifying basic connectivity:
@@ -124,6 +126,10 @@ void setup() {
   
   Serial.println("nanoELS-flow H5 initialization complete");
   Serial.println("Ready for operation...");
+
+  // --- BEGIN TEST ROUTINE ---
+  testRoutine();
+  // --- END TEST ROUTINE ---
 }
 
 void loop() {
@@ -350,6 +356,38 @@ void processMovement() {
     }
     lastStatusPrint = millis();
   }
+}
+
+void testRoutine() {
+  // Display initial MPG and spindle values
+  nextionDisplay.setTopLine("X MPG: " + String(motionControl.getXMPGPulseCount()));
+  nextionDisplay.setPitchLine("Z MPG: " + String(motionControl.getZMPGPulseCount()));
+  nextionDisplay.setPositionLine("Spindle: " + String(motionControl.getSpindlePosition()));
+  nextionDisplay.setStatusLine("Test: Start");
+  delay(2000);
+
+  // Move X axis +4mm, then -4mm
+  nextionDisplay.setStatusLine("X +4mm");
+  motionControl.moveRelative(0, 4000, true);
+  delay(500);
+  nextionDisplay.setStatusLine("X -4mm");
+  motionControl.moveRelative(0, -4000, true);
+  delay(500);
+
+  // Move Z axis +5mm, then -5mm
+  nextionDisplay.setStatusLine("Z +5mm");
+  motionControl.moveRelative(1, 5000, true);
+  delay(500);
+  nextionDisplay.setStatusLine("Z -5mm");
+  motionControl.moveRelative(1, -5000, true);
+  delay(500);
+
+  // Show final MPG and spindle values
+  nextionDisplay.setTopLine("X MPG: " + String(motionControl.getXMPGPulseCount()));
+  nextionDisplay.setPitchLine("Z MPG: " + String(motionControl.getZMPGPulseCount()));
+  nextionDisplay.setPositionLine("Spindle: " + String(motionControl.getSpindlePosition()));
+  nextionDisplay.setStatusLine("Test: Done");
+  delay(2000);
 }
 
 // Old updateDisplay function removed - now handled by NextionDisplay.update() in main loop

@@ -12,102 +12,107 @@ nanoELS-flow is a complete rewrite of the nanoELS Electronic Lead Screw controll
 - **H5**: ESP32-S3-based 3-axis controller with touch screen
 
 ### Project Status
-🚧 **Early Development Phase** - The repository currently contains only documentation. The development environment, build system, and source code structure have not yet been established.
+🚧 **Active Development** - Core architecture implemented with motion control, web interface, and display modules. Hardware abstraction layer and stepper control functional.
 
 ## Development Environment Setup
 
-Since this project targets embedded hardware, the development setup will likely require:
+### Build System Commands
+- **Build**: `pio run -e esp32-s3-devkitc-1`
+- **Upload**: `pio run -e esp32-s3-devkitc-1 --target upload`
+- **Clean**: `pio run --target clean`
+- **Monitor**: `pio device monitor --baud 115200`
+- **Check/Lint**: `pio check` (uses cppcheck)
+- **Build and Upload**: `pio run -e esp32-s3-devkitc-1 --target upload --target monitor`
+- **Dependency Update**: `pio pkg update`
 
-### For ESP32-S3 Targets (H4, H5)
-- **PlatformIO**: Recommended for ESP32-S3 development
-- **Configuration File**: `platformio.ini` (to be created)
-- **Framework**: Arduino or ESP-IDF
-- **Build Command**: `pio run`
-- **Upload Command**: `pio run --target upload`
+### Development Setup
+- **Platform**: PlatformIO with ESP32-S3 support
+- **Target Board**: esp32-s3-devkitc-1
+- **Framework**: Arduino framework for ESP32
+- **Upload Port**: /dev/ttyUSB0 (modify in platformio.ini if needed)
 
-### For Arduino Nano Target (H2)
-- **Arduino IDE** or **PlatformIO**
-- **Board**: Arduino Nano (ATmega328P)
-- **Build**: Arduino IDE compile or PlatformIO
-
-### Expected Project Structure
+### Current Project Structure
 ```
 /
-├── src/                    # Source code
-├── include/               # Header files
-├── lib/                   # Project libraries
-├── test/                  # Unit tests
-├── docs/                  # Documentation
-├── hardware/              # Hardware designs/schematics
+├── nanoELS-flow/           # Arduino IDE compatible folder
+│   └── nanoELS-flow.ino   # Main application file
+├── *.h / *.cpp            # Project modules (root level)
 ├── platformio.ini         # PlatformIO configuration
-└── README.md             # Project documentation
+├── MyHardware.txt         # Pin definitions (authoritative)
+└── MyHardware.h          # C++ header for pin definitions
 ```
 
-## Architecture Goals
+## Code Architecture
 
-Based on the project documentation, the architecture should focus on:
+### Core System Overview
+The application follows a modular architecture with three main subsystems:
 
-### Core Principles
-- **Hardware Compatibility**: Maintain compatibility with original nanoELS hardware
-- **Modular Design**: Clean, maintainable codebase with modular architecture
-- **Multi-Target Support**: Single codebase supporting H2, H4, and H5 variants
-- **Improved Workflow**: Enhanced user interface and operation flow
+1. **MotionControl** (`MotionControl.h/.cpp`): Manages stepper motors via FastAccelStepper, handles encoder inputs, processes motion commands through a real-time queue system
+2. **WebInterface** (`WebInterface.h/.cpp`): Provides HTTP server and WebSocket communication for remote control and monitoring
+3. **NextionDisplay** (`NextionDisplay.h/.cpp`): Manages touch screen interface with state-based display system
 
-### Key Components (To Be Implemented)
-- **Hardware Abstraction Layer**: Support multiple microcontrollers
-- **UI Framework**: Touch screen support for H5, button interface for others
-- **Threading Operations**: Lead screw and threading functionality
-- **Configuration Management**: Settings and parameter storage
-- **Safety Systems**: Limits and error handling
-- **Motor Control**: Stepper motor control for lead screw operation
+### Key Architectural Patterns
+- **Hardware Abstraction**: Pin definitions centralized in `MyHardware.txt` and `MyHardware.h`
+- **Real-time Motion Queue**: Motion commands queued and executed with precise timing
+- **Event-driven Updates**: Each subsystem has `update()` method called from main loop
+- **Global Object Pattern**: Core subsystems instantiated as global objects for real-time access
 
-## Development Workflow
+### Main Application Flow
+The main application (`nanoELS-flow.ino`) coordinates all subsystems:
+```cpp
+void loop() {
+  motionControl.update();    // Process motion queue and encoder data
+  webInterface.update();     // Handle HTTP/WebSocket requests  
+  nextionDisplay.update();   // Update display and process touch events
+  handleKeyboard();          // Process PS2 keyboard input
+  processMovement();         // Handle movement logic and status updates
+}
+```
 
-### Initial Setup Tasks
-1. Create PlatformIO configuration for multi-target builds
-2. Establish source code structure
-3. Set up testing framework
-4. Define hardware abstraction interfaces
-5. Implement build system for all hardware variants
+## WiFi Configuration
 
-### Build Commands (To Be Established)
-Commands will depend on the chosen build system:
-- **PlatformIO**: `pio run -e <environment>`
-- **Testing**: `pio test`
-- **Upload**: `pio run -e <environment> --target upload`
+The system supports two WiFi modes (set `WIFI_MODE` in main .ino file):
 
-### Hardware-Specific Builds
-- **H2 (Arduino Nano)**: Target Arduino framework
-- **H4 (ESP32-S3 4-axis)**: Target ESP32-S3 with extended GPIO
-- **H5 (ESP32-S3 Touch)**: Target ESP32-S3 with display libraries
+### Mode 0: Access Point
+- **SSID**: "nanoELS-flow"  
+- **Password**: "nanoels123"
+- **Web Interface**: http://192.168.4.1
 
-## Code Organization
+### Mode 1: Home Network
+- **SSID**: Configurable in `HOME_WIFI_SSID`
+- **Password**: Configurable in `HOME_WIFI_PASSWORD`  
+- **Fallback**: Automatically creates AP if connection fails
+- **Web Interface**: IP shown in serial monitor
 
-### Hardware Abstraction
-- Separate hardware-specific code from business logic
-- Use conditional compilation for hardware variants
-- Common interfaces for motor control, input handling, and display
+## Debugging and Testing
 
-### Key Modules (Planned)
-- **Motor Control**: Stepper motor drivers and motion control
-- **User Interface**: Display management and input handling  
-- **Threading Engine**: Lead screw calculations and operations
-- **Configuration**: Settings management and persistence
-- **Safety**: Limit checking and emergency stops
-- **Communication**: Serial/USB communication for setup
+### Serial Monitor Output
+- **Baud Rate**: 115200
+- **Motion Status**: Printed every 5 seconds when moving
+- **Diagnostics**: Use keyboard 'Win' key or call `motionControl.printDiagnostics()`
 
-## Testing Strategy
+### Motion Control Testing
+- **Test Function**: `testMotionControl()` in main file (commented out during startup)
+- **Manual Control**: Use arrow keys for axis movement
+- **Emergency Stop**: ESC key (keyboard) or touch interface
 
-### Unit Testing
-- Hardware abstraction layer testing
-- Mathematical calculations (threading, feed rates)
-- Configuration management
-- Safety system validation
+### Development Testing Flow
+1. **Hardware Verification**: Uncomment `testMotionControl()` to verify motor connections
+2. **Keyboard Testing**: Use defined key mappings from `MyHardware.txt`
+3. **Web Interface**: Access via IP address shown in serial output
+4. **Display Testing**: Touch screen interactions via NextionDisplay module
 
-### Hardware-in-Loop Testing
-- Motor control validation
-- User interface testing on actual hardware
-- Timing and real-time performance validation
+### Library Dependencies and Versions
+Key libraries specified in `platformio.ini`:
+- **FastAccelStepper**: `gin66/FastAccelStepper@^0.30.0` (mandatory for all motor control)
+- **WebSockets**: For WebSocket communication
+- **PS2KeyAdvanced**: For PS2 keyboard interface
+
+### File Organization Rules
+- **Main application**: `nanoELS-flow/nanoELS-flow.ino` (Arduino IDE compatible)
+- **Hardware definitions**: `nanoELS-flow/MyHardware.txt` (authoritative pin mappings)
+- **Core modules**: `nanoELS-flow/*.h` and `nanoELS-flow/*.cpp` (modular architecture)
+- **Web assets**: `nanoELS-flow/indexhtml.h` (embedded web interface)
 
 ## PROJECT RULES - MANDATORY FOR ALL DEVELOPMENT
 

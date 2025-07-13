@@ -19,7 +19,10 @@ enum MotionCommandType {
   CMD_ENABLE_AXIS,        // Enable axis
   CMD_DISABLE_AXIS,       // Disable axis
   CMD_SYNC_POSITION,      // Sync with spindle position (future)
-  CMD_SYNC_SPEED          // Sync with spindle speed (future)
+  CMD_SYNC_SPEED,         // Sync with spindle speed (future)
+  CMD_MPG_MOVE,           // MPG-controlled movement
+  CMD_MPG_SYNC,           // MPG synchronized movement
+  CMD_MPG_SETUP           // MPG setup mode
 };
 
 // Motion command structure for queue execution
@@ -29,6 +32,20 @@ struct MotionCommand {
   int32_t value;          // Steps, speed, or position
   uint32_t timestamp;     // Execution timestamp (micros)
   bool blocking;          // Wait for completion
+  float mpgRatio;         // MPG ratio for synchronized moves
+};
+
+// MPG configuration structure
+struct MPGConfig {
+  uint8_t pulsePinA;        // MPG quadrature encoder pin A
+  uint8_t pulsePinB;        // MPG quadrature encoder pin B  
+  uint8_t axis;             // Which axis this MPG controls (0=X, 1=Z)
+  volatile int32_t pulseCount;      // Current MPG pulse count
+  volatile int32_t lastPulseCount;  // Previous count for delta calculation
+  uint32_t lastPulseTime;   // Timestamp for debouncing
+  float stepRatio;          // Steps per MPG pulse (for feel adjustment)
+  bool enabled;             // Whether MPG is active for manual control
+  bool operationActive;     // Whether automatic operation is running (disables MPG)
 };
 
 // Axis configuration structure
@@ -43,6 +60,7 @@ struct AxisConfig {
   int32_t maxLimit;       // Software limit (positive)
   bool enabled;           // Axis enable status
   bool inverted;          // Direction inversion
+  MPGConfig* mpg;         // Associated MPG configuration
 };
 
 // Spindle encoder data structure
@@ -51,6 +69,17 @@ struct SpindleData {
   volatile int32_t rpm;          // Current RPM
   volatile uint32_t lastUpdate;  // Last update timestamp
   bool synchronized;             // Sync status with motion
+};
+
+// Operation setup structure
+struct OperationSetup {
+  float threadPitch;      // Thread pitch in mm
+  int threadStarts;       // Number of thread starts
+  bool threadLeftHand;    // Left-hand thread
+  float taperAngle;       // Taper angle in degrees
+  int operationPasses;    // Number of operation passes
+  float feedRate;         // Feed rate for turning/facing
+  bool operationActive;   // Operation in progress
 };
 
 class MotionControl {
@@ -64,21 +93,34 @@ private:
   AxisConfig axisX;
   AxisConfig axisZ;
   
+  // MPG configurations
+  MPGConfig mpgX;
+  MPGConfig mpgZ;
+  
   // Command queue for real-time execution
   std::queue<MotionCommand> commandQueue;
   
   // Spindle encoder data
   SpindleData spindle;
   
+  // Operation setup
+  OperationSetup operation;
+  
   // Safety and limits
   bool emergencyStop;
   bool limitsEnabled;
   
+  // MPG interrupt handling
+  static void IRAM_ATTR mpgXISR();
+  static void IRAM_ATTR mpgZISR();
+  
   // Internal methods
   void initializeAxis(uint8_t axis);
+  void initializeMPG(uint8_t axis);
   void executeCommand(const MotionCommand& cmd);
   bool checkLimits(uint8_t axis, int32_t targetPosition);
   void updateSpindleData();
+  void processMPGInput(uint8_t axis);
   
 public:
   MotionControl();
@@ -92,6 +134,14 @@ public:
   bool enableAxis(uint8_t axis);
   bool disableAxis(uint8_t axis);
   bool isAxisEnabled(uint8_t axis);
+  
+  // MPG control methods
+  bool enableMPG(uint8_t axis);
+  bool disableMPG(uint8_t axis);
+  bool isMPGEnabled(uint8_t axis);
+  void setMPGRatio(uint8_t axis, float ratio);
+  float getMPGRatio(uint8_t axis);
+  int32_t getMPGPulseCount(uint8_t axis);
   
   // Motion command methods
   bool queueCommand(const MotionCommand& cmd);
@@ -123,6 +173,23 @@ public:
   void setEmergencyStop(bool stop);
   bool getEmergencyStop();
   
+  // Operation setup methods
+  void setThreadPitch(float pitch);
+  float getThreadPitch();
+  void setThreadStarts(int starts);
+  int getThreadStarts();
+  void setThreadLeftHand(bool leftHand);
+  bool getThreadLeftHand();
+  void setTaperAngle(float angle);
+  float getTaperAngle();
+  void setOperationPasses(int passes);
+  int getOperationPasses();
+  void setFeedRate(float feedRate);
+  float getFeedRate();
+  void startOperation();
+  void stopOperation();
+  bool isOperationActive();
+  
   // Spindle synchronization methods (for future implementation)
   void initializeSpindleEncoder();
   int32_t getSpindlePosition();
@@ -134,6 +201,8 @@ public:
   void update();  // Call frequently in main loop
   String getStatus();
   void printDiagnostics();
+  int32_t getXMPGPulseCount() const;
+  int32_t getZMPGPulseCount() const;
 };
 
 // Global motion control instance
@@ -155,5 +224,6 @@ inline char getCharFromAxis(uint8_t axis) {
 MotionCommand createMoveCommand(uint8_t axis, int32_t steps, bool relative = true);
 MotionCommand createSpeedCommand(uint8_t axis, uint32_t speed);
 MotionCommand createStopCommand(uint8_t axis);
+MotionCommand createMPGCommand(uint8_t axis, int32_t pulses, float ratio = 1.0);
 
 #endif // MOTIONCONTROL_H
