@@ -87,60 +87,54 @@ void updateDisplay();
 void processMovement();
 void testMotionControl();  // Testing function for motion control
 void initializeWebInterface();  // Web interface initialization
-void testRoutine(); // New test routine function
 
 void setup() {
   Serial.begin(115200);
-  Serial.println();
-  Serial.println("=================================");
-  Serial.println("nanoELS-flow H5 (ESP32-S3-dev)");
-  Serial.println("Electronic Lead Screw Controller");
-  Serial.println("=================================");
+  Serial.println("Starting nanoELS-flow H5...");
   
-  // Initialize hardware subsystems
-  Serial.println("Initializing Motion Control System...");
-  if (!motionControl.initialize()) {
-    Serial.println("CRITICAL ERROR: Motion control initialization failed!");
-    while(1) delay(1000); // Halt on critical error
-  }
+  // Initialize PS2 keyboard interface
+  keyboard.begin(KEY_DATA, KEY_CLOCK);
+  Serial.println("✓ PS2 keyboard interface initialized");
+  Serial.printf("Debug: B_ON=%d, B_OFF=%d\n", B_ON, B_OFF);
   
-  Serial.println("Initializing PS2 keyboard interface...");
-  initializeKeyboard();
-  
+  // MINIMAL setup - exactly like NextionDisplayTest
   Serial.println("Initializing Nextion display...");
   nextionDisplay.initialize();
-  nextionDisplay.showInitProgress("Motion control...");
-  delay(1000); // Give the display time to finish booting
-  
-  // Skip motion control tests during startup to avoid hang
-  // Uncomment this line after verifying basic connectivity:
-  // testMotionControl();
-  Serial.println("Skipping motion tests during startup...");
-  
-  Serial.println("Initializing web interface...");
-  nextionDisplay.showInitProgress("Starting WiFi...");
-  initializeWebInterface();
-  
-  // Initialize preferences
-  prefs.begin("nanoels", false);
-  
-  Serial.println("nanoELS-flow H5 initialization complete");
-  Serial.println("Ready for operation...");
-
-  // --- BEGIN TEST ROUTINE ---
-  testRoutine();
-  // --- END TEST ROUTINE ---
+  Serial.println("Display initialized, splash screen should be visible");
+  Serial.println("After splash, will show ELS data");
 }
 
 void loop() {
-  // Main control loop
-  motionControl.update();    // Process motion commands and update spindle data
-  webInterface.update();     // Process web server and WebSocket events
-  nextionDisplay.update();   // Update Nextion display
-  handleKeyboard();          // Process keyboard input
-  processMovement();         // Handle movement commands
+  // EXACTLY like NextionDisplayTest that works - minimal calls only
   
-  // No delay needed - motion control handles timing internally
+  // Update motion control (but don't initialize until after splash)
+  static bool motionInitialized = false;
+  if (motionInitialized) {
+    motionControl.update();
+  }
+  
+  // CRITICAL: Must call update() for splash screen timing and display updates
+  nextionDisplay.update();
+  
+  // Initialize motion control ONLY after splash screen works
+  if (!motionInitialized && nextionDisplay.getState() == DISPLAY_STATE_NORMAL) {
+    Serial.println("Splash screen complete, initializing motion control...");
+    motionControl.initialize();
+    motionInitialized = true;
+    Serial.println("Motion control initialized");
+  }
+  
+  // Process MPG inputs for real-time axis control
+  if (motionInitialized) {
+    motionControl.processMPGInputs();
+  }
+  
+  // Handle keyboard input
+  if (motionInitialized) {
+    handleKeyboard();
+  }
+  
+  delay(50); // Small delay like NextionDisplayTest
 }
 
 void testMotionControl() {
@@ -270,17 +264,25 @@ void handleKeyboard() {
         Serial.println("X-axis moving backward");
         break;
         
-      case B_OFF:    // Emergency stop
-        motionControl.setEmergencyStop(true);
-        nextionDisplay.showEmergencyStop();
-        Serial.println("EMERGENCY STOP ACTIVATED");
+      case B_OFF:    // Exit turning mode / Emergency stop
+        if (motionControl.isTurningModeActive()) {
+          motionControl.stopTurningMode();
+          nextionDisplay.showMessage("Manual Mode", NEXTION_T3, 2000);
+        } else {
+          motionControl.setEmergencyStop(true);
+          nextionDisplay.showEmergencyStop();
+        }
         break;
         
-      case B_ON:     // Release emergency stop
-        motionControl.setEmergencyStop(false);
-        nextionDisplay.setState(DISPLAY_STATE_NORMAL);
-        nextionDisplay.showMessage("E-Stop released", NEXTION_T3, 2000);
-        Serial.println("Emergency stop released");
+      case B_ON:     // Start turning mode / Release emergency stop
+        if (motionControl.getEmergencyStop()) {
+          motionControl.setEmergencyStop(false);
+          nextionDisplay.setState(DISPLAY_STATE_NORMAL);
+          nextionDisplay.showMessage("E-Stop released", NEXTION_T3, 2000);
+        } else {
+          motionControl.startTurningMode();
+          nextionDisplay.showMessage("TURNING MODE", NEXTION_T3, 2000);
+        }
         break;
         
       case B_X:      // Zero X-axis
@@ -358,36 +360,5 @@ void processMovement() {
   }
 }
 
-void testRoutine() {
-  // Display initial MPG and spindle values
-  nextionDisplay.setTopLine("X MPG: " + String(motionControl.getXMPGPulseCount()));
-  nextionDisplay.setPitchLine("Z MPG: " + String(motionControl.getZMPGPulseCount()));
-  nextionDisplay.setPositionLine("Spindle: " + String(motionControl.getSpindlePosition()));
-  nextionDisplay.setStatusLine("Test: Start");
-  delay(2000);
-
-  // Move X axis +4mm, then -4mm
-  nextionDisplay.setStatusLine("X +4mm");
-  motionControl.moveRelative(0, 4000, true);
-  delay(500);
-  nextionDisplay.setStatusLine("X -4mm");
-  motionControl.moveRelative(0, -4000, true);
-  delay(500);
-
-  // Move Z axis +5mm, then -5mm
-  nextionDisplay.setStatusLine("Z +5mm");
-  motionControl.moveRelative(1, 5000, true);
-  delay(500);
-  nextionDisplay.setStatusLine("Z -5mm");
-  motionControl.moveRelative(1, -5000, true);
-  delay(500);
-
-  // Show final MPG and spindle values
-  nextionDisplay.setTopLine("X MPG: " + String(motionControl.getXMPGPulseCount()));
-  nextionDisplay.setPitchLine("Z MPG: " + String(motionControl.getZMPGPulseCount()));
-  nextionDisplay.setPositionLine("Spindle: " + String(motionControl.getSpindlePosition()));
-  nextionDisplay.setStatusLine("Test: Done");
-  delay(2000);
-}
 
 // Old updateDisplay function removed - now handled by NextionDisplay.update() in main loop

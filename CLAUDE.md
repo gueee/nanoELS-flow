@@ -25,6 +25,12 @@ nanoELS-flow is a complete rewrite of the nanoELS Electronic Lead Screw controll
 - **Build and Upload**: `pio run -e esp32-s3-devkitc-1 --target upload --target monitor`
 - **Dependency Update**: `pio pkg update`
 
+### Quick Development Commands
+- **Full cycle**: `pio run -e esp32-s3-devkitc-1 --target upload --target monitor` (build, upload, monitor)
+- **List devices**: `pio device list` (find correct upload port)
+- **Verbose build**: `pio run -e esp32-s3-devkitc-1 -v` (detailed build output)
+- **Force rebuild**: `pio run -e esp32-s3-devkitc-1 --target clean --target upload`
+
 ### Development Setup
 - **Platform**: PlatformIO with ESP32-S3 support
 - **Target Board**: esp32-s3-devkitc-1
@@ -108,11 +114,32 @@ Key libraries specified in `platformio.ini`:
 - **WebSockets**: For WebSocket communication
 - **PS2KeyAdvanced**: For PS2 keyboard interface
 
+#### ESP32-S3 Build Configuration
+- **Platform**: espressif32
+- **Framework**: Arduino
+- **CPU Frequency**: 240MHz
+- **Flash Mode**: QIO
+- **Partitions**: huge_app.csv (for large application)
+- **PSRAM**: Enabled with cache fix
+- **Upload Speed**: 921600 baud
+- **Debug Level**: 0 (production)
+
 ### File Organization Rules
 - **Main application**: `nanoELS-flow/nanoELS-flow.ino` (Arduino IDE compatible)
 - **Hardware definitions**: `nanoELS-flow/MyHardware.txt` (authoritative pin mappings)
 - **Core modules**: `nanoELS-flow/*.h` and `nanoELS-flow/*.cpp` (modular architecture)
 - **Web assets**: `nanoELS-flow/indexhtml.h` (embedded web interface)
+
+### Project File Structure Details
+```
+nanoELS-flow/
+├── nanoELS-flow.ino          # Main application entry point
+├── MotionControl.h/.cpp      # Stepper motor control via FastAccelStepper
+├── WebInterface.h/.cpp       # HTTP server and WebSocket handlers
+├── NextionDisplay.h/.cpp     # Touch screen display management
+├── MyHardware.h/.txt         # Hardware pin definitions (authoritative)
+└── indexhtml.h               # Embedded web interface HTML/CSS/JS
+```
 
 ## PROJECT RULES - MANDATORY FOR ALL DEVELOPMENT
 
@@ -278,6 +305,17 @@ Key libraries specified in `platformio.ini`:
 4. FastAccelStepper library is MANDATORY for motor control
 5. Y-axis is NOT implemented - ignore completely
 6. Always refer to ESP32-S3 datasheet for hardware capabilities
+
+## Project Memories and Notes
+
+### File and Hardware Notes
+- MyHardware.tct is only a reference not part of the code
+
+### Motor Movement Mapping
+- 4000 steps equals 4mm movement on x and 5mm movement on z
+
+### System Communication Notes
+- No serial output available only nextion display
 
 ## License
 

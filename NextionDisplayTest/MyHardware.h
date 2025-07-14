@@ -34,6 +34,10 @@
 #define KEY_DATA 37
 #define KEY_CLOCK 36
 
+// Nextion Display pins (Serial1)
+#define NEXTION_TX 43
+#define NEXTION_RX 44
+
 // Keyboard key definitions (personal development configuration)
 #define B_LEFT 68      // Left arrow - Z axis left movement
 #define B_RIGHT 75     // Right arrow - Z axis right movement

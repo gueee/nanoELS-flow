@@ -40,6 +40,7 @@ private:
   
   // Splash screen management (from original h5.ino)
   bool splashScreen;
+  bool splashShown;
   unsigned long splashStartTime;
   
   // Hash tracking for change detection (from original code)

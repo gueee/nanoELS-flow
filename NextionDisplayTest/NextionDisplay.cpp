@@ -18,14 +18,20 @@ NextionDisplay::NextionDisplay() {
   for (int i = 0; i < 4; i++) {
     lastHash[i] = LCD_HASH_INITIAL;
   }
-}
+}  // End of NextionDisplay constructor
+
+#include <HardwareSerial.h>  // Ensure Serial and Serial1 are declared
+
+#ifndef SERIAL_8N1
+#define SERIAL_8N1 0x8000010UL  // Fallback definition if not provided by platform
+#endif
 
 void NextionDisplay::initialize() {
   Serial.println("Initializing Nextion display...");
   
   // Initialize Serial1 for Nextion communication (EXACTLY matching original h5.ino)
-  // Original uses pins 44 (RX) and 43 (TX) but let's try default pins first
-  Serial1.begin(115200, SERIAL_8N1);
+  // CRITICAL: Must use exact same pins as original - GPIO 44 (RX) and 43 (TX)
+  Serial1.begin(115200, SERIAL_8N1, 44, 43);
   
   // CRITICAL: Original waits 1300ms for Nextion to boot
   Serial.println("Waiting for Nextion to boot (1300ms)...");

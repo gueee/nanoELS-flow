@@ -6,8 +6,7 @@
 #include <queue>
 #include "MyHardware.h"
 
-// ESP32 IDF v5.x compatible includes - avoid PCNT conflicts with FastAccelStepper
-// We'll implement a simplified encoder interface without direct PCNT dependency
+// Simple interrupt-based encoder support (avoid PCNT conflicts with FastAccelStepper)
 
 // Motion command types for real-time execution
 enum MotionCommandType {
@@ -82,6 +81,28 @@ struct OperationSetup {
   bool operationActive;   // Operation in progress
 };
 
+// Turning mode state
+enum TurningState {
+  TURNING_IDLE,
+  TURNING_FEEDING,     // Z-axis following spindle
+  TURNING_RETRACTING,  // X-axis retracting
+  TURNING_RETURNING,   // Z-axis returning to start
+  TURNING_ADVANCING    // X-axis advancing
+};
+
+struct TurningMode {
+  bool active;           // Turning mode active
+  TurningState state;    // Current turning state
+  int currentPass;       // Current pass number (1-3)
+  int32_t startZPos;     // Starting Z position
+  int32_t startXPos;     // Starting X position  
+  int32_t targetZPos;    // Target Z position (40mm)
+  int32_t spindleStartPos; // Spindle position at start of pass
+  int32_t spindleSyncPos; // Target spindle position for synchronization
+  float zFeedRatio;      // Z movement ratio to spindle
+  bool waitingForSync;   // Waiting for spindle to reach sync position
+};
+
 class MotionControl {
 private:
   // FastAccelStepper objects
@@ -105,6 +126,9 @@ private:
   
   // Operation setup
   OperationSetup operation;
+  
+  // Turning mode
+  TurningMode turning;
   
   // Safety and limits
   bool emergencyStop;
@@ -190,6 +214,12 @@ public:
   void stopOperation();
   bool isOperationActive();
   
+  // Turning mode methods
+  void startTurningMode();
+  void stopTurningMode();
+  bool isTurningModeActive();
+  void updateTurningMode();
+  
   // Spindle synchronization methods (for future implementation)
   void initializeSpindleEncoder();
   int32_t getSpindlePosition();
@@ -203,13 +233,18 @@ public:
   void printDiagnostics();
   int32_t getXMPGPulseCount() const;
   int32_t getZMPGPulseCount() const;
+  
+  // MPG real-time control
+  void processMPGInputs();
 };
 
 // Global motion control instance
 extern MotionControl motionControl;
 
-// Spindle encoder interrupt handlers (PCNT_UNIT_0)
+// Encoder interrupt handlers (ISR functions)
 void IRAM_ATTR spindleEncoderISR();
+void IRAM_ATTR xMPGEncoderISR();
+void IRAM_ATTR zMPGEncoderISR();
 
 // Motion control helper functions
 inline uint8_t getAxisFromChar(char axis) {

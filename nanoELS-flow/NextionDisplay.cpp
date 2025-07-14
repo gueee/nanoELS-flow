@@ -11,6 +11,7 @@ NextionDisplay::NextionDisplay() {
   
   // Initialize splash screen (from original h5.ino)
   splashScreen = true;
+  splashShown = false;
   splashStartTime = 0;
   
   // Initialize hash tracking (from original h5.ino)
@@ -22,16 +23,27 @@ NextionDisplay::NextionDisplay() {
 void NextionDisplay::initialize() {
   Serial.println("Initializing Nextion display...");
   
-  // Initialize Serial1 for Nextion communication (matching original h5.ino)
-  Serial1.begin(115200);
+  // Initialize Serial1 for Nextion communication (EXACTLY matching original h5.ino)
+  // CRITICAL: Must use exact same pins as original - GPIO 44 (RX) and 43 (TX)
+  Serial1.begin(115200, SERIAL_8N1, NEXTION_RX, NEXTION_TX);
+  
+  // CRITICAL: Original waits 1300ms for Nextion to boot
+  // From original h5.ino: "Nextion needs time to boot or first display update will be ignored."
+  Serial.println("Waiting for Nextion to boot (1300ms)...");
+  delay(1300);  // This delay is MANDATORY - do not reduce!
+  
+  // Send a simple wakeup command to ensure communication
+  toScreen("sleep=0");
+  
+  // Small additional delay after first command
   delay(100);
   
-  // Set splash screen start time
-  splashStartTime = millis();
+  // Set splash screen flag (like original reset() function) 
   splashScreen = true;
+  splashShown = false;
+  splashStartTime = millis();  // Set start time immediately
   
-  // Don't clear or show anything yet - let update() handle splash screen
-  Serial.println("✓ Nextion display initialized at 115200 baud");
+  Serial.println("✓ Nextion display initialized with proper 1300ms boot delay");
 }
 
 void NextionDisplay::toScreen(const String& command) {
@@ -115,29 +127,60 @@ void NextionDisplay::showWiFiStatus(const String& status, bool connecting) {
 }
 
 void NextionDisplay::showMotionStatus() {
-  // Top line: System status
-  String topLine = "nanoELS-H5 Ready";
+  // Top line: Mode and status (matching original h5.ino format)
+  extern int currentMode;
+  extern int stepSize;
+  String topLine = "";
   if (motionControl.getEmergencyStop()) {
     topLine = "EMERGENCY STOP";
   } else if (motionControl.isMoving()) {
-    topLine = "MOVING";
+    topLine = "MOVING - ";
+    switch(currentMode) {
+      case 0: topLine += "Manual"; break;
+      case 1: topLine += "Threading"; break;
+      case 2: topLine += "Turning"; break;
+      case 3: topLine += "Facing"; break;
+      case 4: topLine += "Cone"; break;
+      case 5: topLine += "Cutting"; break;
+      default: topLine += "Mode " + String(currentMode); break;
+    }
+  } else {
+    switch(currentMode) {
+      case 0: topLine = "Manual Mode"; break;
+      case 1: topLine = "Threading"; break;
+      case 2: topLine = "Turning"; break;
+      case 3: topLine = "Facing"; break;
+      case 4: topLine = "Cone"; break;
+      case 5: topLine = "Cutting"; break;
+      default: topLine = "Mode " + String(currentMode); break;
+    }
+    topLine += " Step:" + String(stepSize);
   }
   setTopLine(topLine);
   
-  // Pitch line: Current mode and step size
-  extern int currentMode;
-  extern int stepSize;
-  String pitchLine = "Mode:" + String(currentMode) + " Step:" + String(stepSize);
+  // Pitch line: Thread pitch info (matching original format)
+  String pitchLine = "Pitch 1.25mm x1";  // Default values for now
   setPitchLine(pitchLine);
   
-  // Position line: Axis positions
-  String posLine = "X:" + String(motionControl.getPosition(0)) + 
-                   " Z:" + String(motionControl.getPosition(1));
+  // Position line: Axis positions (matching original format "Z:xxx.xx X:xxx.xx")
+  float xPos = motionControl.getPosition(0) / 1000.0;  // Convert steps to mm
+  float zPos = motionControl.getPosition(1) / 1000.0;  // Convert steps to mm
+  String posLine = "Z:" + String(zPos, 2) + " X:" + String(xPos, 2);
   setPositionLine(posLine);
   
-  // Status line: Spindle info
-  String statusLine = "RPM:" + String(motionControl.getSpindleRPM()) + 
-                     " Enc:" + String(motionControl.getSpindlePosition());
+  // Status line: RPM and encoder info (matching original format)
+  String statusLine = "";
+  int rpm = motionControl.getSpindleRPM();
+  int spindlePos = motionControl.getSpindlePosition();
+  int xMPG = motionControl.getXMPGPulseCount();
+  int zMPG = motionControl.getZMPGPulseCount();
+  
+  if (rpm > 0) {
+    statusLine = String(rpm) + "rpm ";
+  }
+  statusLine += "Enc:" + String(spindlePos);
+  statusLine += " X:" + String(xMPG) + " Z:" + String(zMPG);
+  
   setStatusLine(statusLine);
 }
 

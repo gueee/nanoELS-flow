@@ -15,6 +15,10 @@
 #define KEY_DATA 37
 #define KEY_CLOCK 36
 
+// Nextion Display pins (Serial1)
+#define NEXTION_TX 43
+#define NEXTION_RX 44
+
 #define B_LEFT 68 // Left arrow - controls Z axis movement to the left
 #define B_RIGHT 75 // Right arrow - controls Z axis movement to the right
 #define B_UP 85 // Up arrow - controls X axis movement forwards
@@ -58,3 +62,13 @@
 #define B_Z 99 // z - zeroes Z axis
 #define B_X_ENA 93 // c - enables / disables X axis
 #define B_Z_ENA 74 // q - enables / disables Z axis
+
+  // Debug.
+  Serial.begin(115200);
+
+  // Nextion.
+  Serial1.begin(115200, SERIAL_8N1, 44, 43);
+
+  // Initialize the keyboard.
+  keyboard.begin(KEY_DATA, KEY_CLOCK);
+  xTaskCreatePinnedToCore(taskKeypad, "taskKeypad", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);

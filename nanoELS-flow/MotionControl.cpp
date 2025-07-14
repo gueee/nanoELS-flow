@@ -19,9 +19,12 @@ MotionControl::MotionControl() {
   emergencyStop = false;
   limitsEnabled = true;
   
-  // Initialize axis configurations with safe defaults
-  axisX = {X_STEP, X_DIR, X_ENA, 2000, 4000, 0, -100000, 100000, false, false, nullptr};
-  axisZ = {Z_STEP, Z_DIR, Z_ENA, 2000, 4000, 0, -100000, 100000, false, false, nullptr};
+  // Initialize axis configurations matching original h5.ino settings
+  // X-axis: INVERT_X = true, SCREW_X_DU = 40000 (4mm per 800 steps = 5000 steps/mm)
+  // Z-axis: INVERT_Z = false, SCREW_Z_DU = 40000 (4mm per 800 steps = 5000 steps/mm)
+  // Teknic ClearPath servos - much higher speeds for fast MPG response
+  axisX = {X_STEP, X_DIR, X_ENA, 100000, 200000, 0, -100000, 100000, false, true, nullptr};   // inverted=true for X
+  axisZ = {Z_STEP, Z_DIR, Z_ENA, 100000, 200000, 0, -100000, 100000, false, false, nullptr};  // inverted=false for Z
   
   // Initialize MPG configurations (assign members individually)
   mpgX.pulsePinA = X_PULSE_A;
@@ -53,6 +56,9 @@ MotionControl::MotionControl() {
   
   // Initialize operation setup
   operation = {1.5, 1, false, 0.0, 1, 0.1, false};
+  
+  // Initialize turning mode
+  turning = {false, TURNING_IDLE, 0, 0, 0, 0, 0, 0, 0.0, false};
 }
 
 MotionControl::~MotionControl() {
@@ -101,7 +107,7 @@ void MotionControl::initializeAxis(uint8_t axis) {
   
   // Configure stepper pins
   stepper->setDirectionPin(config->dirPin);
-  stepper->setEnablePin(config->enablePin);
+  stepper->setEnablePin(config->enablePin, true);  // true = inverted enable (both axes need inverted enable)
   stepper->setAutoEnable(true);
   
   // Set default speed and acceleration
@@ -129,17 +135,19 @@ void MotionControl::initializeMPG(uint8_t axis) {
   
   // Attach interrupts for quadrature decoding
   if (axis == 0) {
-    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinA), mpgXISR, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinB), mpgXISR, CHANGE);
+    // X-axis MPG
+    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinA), xMPGEncoderISR, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinB), xMPGEncoderISR, CHANGE);
   } else {
-    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinA), mpgZISR, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinB), mpgZISR, CHANGE);
+    // Z-axis MPG
+    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinA), zMPGEncoderISR, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(mpg->pulsePinB), zMPGEncoderISR, CHANGE);
   }
   
   // Enable MPG by default
   mpg->enabled = true;
   
-  Serial.printf("✓ %c-axis MPG initialized (A:%d, B:%d)\n", 
+  Serial.printf("✓ %c-axis MPG ISR initialized (A:%d, B:%d)\n", 
                 getCharFromAxis(axis), mpg->pulsePinA, mpg->pulsePinB);
 }
 
@@ -180,18 +188,75 @@ void IRAM_ATTR MotionControl::mpgZISR() {
   mpgZLastPulseTime = micros();
 }
 
+// Global encoder counters (volatile for ISR access)
+volatile int32_t spindleEncoderCount = 0;
+volatile int32_t xMPGEncoderCount = 0;
+volatile int32_t zMPGEncoderCount = 0;
+
+// Spindle encoder ISR
+void IRAM_ATTR spindleEncoderISR() {
+  static uint8_t lastState = 0;
+  uint8_t currentState = (digitalRead(ENC_A) << 1) | digitalRead(ENC_B);
+  
+  // Simple quadrature decoding
+  if (lastState == 0b00 && currentState == 0b01) spindleEncoderCount++;
+  else if (lastState == 0b01 && currentState == 0b11) spindleEncoderCount++;
+  else if (lastState == 0b11 && currentState == 0b10) spindleEncoderCount++;
+  else if (lastState == 0b10 && currentState == 0b00) spindleEncoderCount++;
+  else if (lastState == 0b01 && currentState == 0b00) spindleEncoderCount--;
+  else if (lastState == 0b11 && currentState == 0b01) spindleEncoderCount--;
+  else if (lastState == 0b10 && currentState == 0b11) spindleEncoderCount--;
+  else if (lastState == 0b00 && currentState == 0b10) spindleEncoderCount--;
+  
+  lastState = currentState;
+}
+
+// X MPG encoder ISR
+void IRAM_ATTR xMPGEncoderISR() {
+  static uint8_t lastState = 0;
+  uint8_t currentState = (digitalRead(X_PULSE_A) << 1) | digitalRead(X_PULSE_B);
+  
+  // Simple quadrature decoding
+  if (lastState == 0b00 && currentState == 0b01) xMPGEncoderCount++;
+  else if (lastState == 0b01 && currentState == 0b11) xMPGEncoderCount++;
+  else if (lastState == 0b11 && currentState == 0b10) xMPGEncoderCount++;
+  else if (lastState == 0b10 && currentState == 0b00) xMPGEncoderCount++;
+  else if (lastState == 0b01 && currentState == 0b00) xMPGEncoderCount--;
+  else if (lastState == 0b11 && currentState == 0b01) xMPGEncoderCount--;
+  else if (lastState == 0b10 && currentState == 0b11) xMPGEncoderCount--;
+  else if (lastState == 0b00 && currentState == 0b10) xMPGEncoderCount--;
+  
+  lastState = currentState;
+}
+
+// Z MPG encoder ISR
+void IRAM_ATTR zMPGEncoderISR() {
+  static uint8_t lastState = 0;
+  uint8_t currentState = (digitalRead(Z_PULSE_A) << 1) | digitalRead(Z_PULSE_B);
+  
+  // Simple quadrature decoding
+  if (lastState == 0b00 && currentState == 0b01) zMPGEncoderCount++;
+  else if (lastState == 0b01 && currentState == 0b11) zMPGEncoderCount++;
+  else if (lastState == 0b11 && currentState == 0b10) zMPGEncoderCount++;
+  else if (lastState == 0b10 && currentState == 0b00) zMPGEncoderCount++;
+  else if (lastState == 0b01 && currentState == 0b00) zMPGEncoderCount--;
+  else if (lastState == 0b11 && currentState == 0b01) zMPGEncoderCount--;
+  else if (lastState == 0b10 && currentState == 0b11) zMPGEncoderCount--;
+  else if (lastState == 0b00 && currentState == 0b10) zMPGEncoderCount--;
+  
+  lastState = currentState;
+}
+
 void MotionControl::initializeSpindleEncoder() {
-  // Simple interrupt-based encoder (avoiding PCNT conflicts)
-  // Configure encoder pins as inputs with pullups
+  // Configure spindle encoder pins as inputs with pullups
   pinMode(ENC_A, INPUT_PULLUP);
   pinMode(ENC_B, INPUT_PULLUP);
   
-  // For now, we'll implement a basic interrupt-based counter
-  // TODO: Implement quadrature decoding with interrupts
-  // This avoids the PCNT API conflicts with FastAccelStepper
+  // Attach interrupts for quadrature decoding
+  attachInterrupt(digitalPinToInterrupt(ENC_A), spindleEncoderISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B), spindleEncoderISR, CHANGE);
   
-  Serial.printf("✓ Spindle encoder pins configured (A:%d, B:%d)\n", ENC_A, ENC_B);
-  Serial.println("  NOTE: Using simplified encoder interface (PCNT conflicts avoided)");
+  Serial.printf("✓ Spindle encoder ISR initialized (A:%d, B:%d)\n", ENC_A, ENC_B);
 }
 
 bool MotionControl::enableAxis(uint8_t axis) {
@@ -273,11 +338,13 @@ int32_t MotionControl::getMPGPulseCount(uint8_t axis) {
 }
 
 int32_t MotionControl::getXMPGPulseCount() const {
-  return mpgX.pulseCount;
+  // Return X MPG encoder count from ISR
+  return xMPGEncoderCount;
 }
 
 int32_t MotionControl::getZMPGPulseCount() const {
-  return mpgZ.pulseCount;
+  // Return Z MPG encoder count from ISR
+  return zMPGEncoderCount;
 }
 
 bool MotionControl::queueCommand(const MotionCommand& cmd) {
@@ -469,15 +536,8 @@ bool MotionControl::stopAll() {
 }
 
 int32_t MotionControl::getSpindlePosition() {
-  // Simple encoder reading (avoiding PCNT API conflicts)
-  // TODO: Implement proper quadrature decoding
-  static int32_t simulatedPosition = 0;
-  
-  // For now, return a simulated position that increments slowly
-  // This will be replaced with proper encoder reading later
-  simulatedPosition += (millis() % 100 == 0) ? 1 : 0;
-  
-  return simulatedPosition;
+  // Return spindle encoder count from ISR
+  return spindleEncoderCount;
 }
 
 int32_t MotionControl::getSpindleRPM() {
@@ -496,9 +556,10 @@ void MotionControl::updateSpindleData() {
     int32_t deltaPosition = currentPosition - lastPosition;
     uint32_t deltaTime = currentTime - lastTime;
     
-    // Calculate RPM (assuming ENCODER_PPR pulses per revolution)
+    // Calculate RPM (quadrature decoding gives 4x counts per pulse)
+    // ENCODER_PPR * 4 = total counts per revolution
     if (deltaTime > 0) {
-      spindle.rpm = (deltaPosition * 60000) / (ENCODER_PPR * deltaTime);
+      spindle.rpm = (deltaPosition * 60000) / (ENCODER_PPR * 4 * deltaTime);
     }
     
     spindle.position = currentPosition;
@@ -519,6 +580,9 @@ void MotionControl::update() {
   
   // Update spindle data
   updateSpindleData();
+  
+  // Update turning mode
+  updateTurningMode();
   
   // Check emergency stop
   if (emergencyStop) {
@@ -787,4 +851,196 @@ MotionCommand createMPGCommand(uint8_t axis, int32_t pulses, float ratio) {
   cmd.blocking = false;
   cmd.mpgRatio = ratio;
   return cmd;
+}
+
+// Real-time MPG processing for both axes (only active when not in turning mode)
+void MotionControl::processMPGInputs() {
+  // Don't process MPG inputs during turning mode
+  if (turning.active) return;
+  
+  static int32_t lastXCount = 0;
+  static int32_t lastZCount = 0;
+  
+  // Process X-axis MPG
+  int32_t currentXCount = getXMPGPulseCount();
+  int32_t deltaX = currentXCount - lastXCount;
+  if (deltaX != 0 && axisX.enabled) {
+    // X-axis: 4000 steps = 4mm → 1000 steps/mm
+    // 4 pulses per detent, 0.1mm per detent → 0.1mm = 100 steps
+    int32_t steps = (deltaX * 100) / 4;  // 100 steps per 4 pulses = 25 steps per pulse
+    if (abs(steps) > 0) {
+      moveRelative(0, steps, false);  // Non-blocking movement
+      lastXCount = currentXCount;
+    }
+  }
+  
+  // Process Z-axis MPG  
+  int32_t currentZCount = getZMPGPulseCount();
+  int32_t deltaZ = currentZCount - lastZCount;
+  if (deltaZ != 0 && axisZ.enabled) {
+    // Z-axis: 4000 steps = 5mm → 800 steps/mm
+    // 4 pulses per detent, 0.1mm per detent → 0.1mm = 80 steps
+    int32_t steps = (deltaZ * 80) / 4;  // 80 steps per 4 pulses = 20 steps per pulse
+    if (abs(steps) > 0) {
+      moveRelative(1, steps, false);  // Non-blocking movement
+      lastZCount = currentZCount;
+    }
+  }
+}
+
+// Turning mode implementation
+void MotionControl::startTurningMode() {
+  if (turning.active) return;
+  
+  Serial.println("=== STARTING TURNING MODE ===");
+  
+  // Initialize turning mode
+  turning.active = true;
+  turning.state = TURNING_IDLE;
+  turning.currentPass = 1;
+  turning.startZPos = getPosition(1);  // Current Z position as starting point
+  turning.startXPos = getPosition(0);  // Current X position as starting point
+  
+  // Target will be 40mm from current position (32000 steps for Z-axis, 800 steps/mm)
+  turning.targetZPos = turning.startZPos + 32000;
+  
+  // Record current spindle position as the sync reference point
+  turning.spindleSyncPos = getSpindlePosition();
+  turning.spindleStartPos = turning.spindleSyncPos;
+  turning.waitingForSync = false;
+  
+  // Get current step size (pitch setting)
+  extern int stepSize;
+  
+  Serial.printf("Turning mode: Start Z=%d, X=%d, Spindle sync pos=%d, Pitch=%d steps/rev\n", 
+                turning.startZPos, turning.startXPos, turning.spindleSyncPos, stepSize);
+}
+
+void MotionControl::stopTurningMode() {
+  if (!turning.active) return;
+  
+  Serial.println("=== STOPPING TURNING MODE ===");
+  
+  // Stop all axes immediately
+  stopAll();
+  
+  // Reset turning mode completely
+  turning.active = false;
+  turning.state = TURNING_IDLE;
+  turning.currentPass = 0;
+  turning.waitingForSync = false;
+  
+  Serial.println("Turning mode stopped - MPG control restored");
+}
+
+bool MotionControl::isTurningModeActive() {
+  return turning.active;
+}
+
+void MotionControl::updateTurningMode() {
+  if (!turning.active) return;
+  
+  int32_t currentSpindleRPM = getSpindleRPM();
+  
+  // Don't move if spindle isn't turning
+  if (abs(currentSpindleRPM) < 10) {
+    return;
+  }
+  
+  int32_t currentZPos = getPosition(1);
+  int32_t currentXPos = getPosition(0);
+  int32_t spindlePos = getSpindlePosition();
+  
+  switch (turning.state) {
+    case TURNING_IDLE:
+      // For first pass, start immediately. For subsequent passes, wait for sync position
+      if (turning.currentPass == 1) {
+        // First pass - start immediately
+        turning.state = TURNING_FEEDING;
+        turning.spindleStartPos = spindlePos;
+        Serial.printf("Pass %d: Starting immediately at spindle pos %d\n", turning.currentPass, spindlePos);
+      } else {
+        // Subsequent passes - wait for spindle to reach the sync position
+        if (turning.waitingForSync) {
+          // Check if spindle has reached the sync position (within tolerance)
+          int32_t spindleDelta = abs(spindlePos - turning.spindleSyncPos);
+          if (spindleDelta < 100) { // Larger tolerance for easier sync
+            turning.waitingForSync = false;
+            turning.state = TURNING_FEEDING;
+            turning.spindleStartPos = spindlePos;
+            Serial.printf("Pass %d: Spindle synced at %d, starting Z feed\n", turning.currentPass, spindlePos);
+          }
+        } else {
+          // Start waiting for sync position
+          turning.waitingForSync = true;
+          Serial.printf("Pass %d: Waiting for spindle sync position %d (current: %d)\n", 
+                       turning.currentPass, turning.spindleSyncPos, spindlePos);
+        }
+      }
+      break;
+      
+    case TURNING_FEEDING:
+      // Z-axis follows spindle: moves stepSize per spindle revolution
+      {
+        int32_t spindleDelta = spindlePos - turning.spindleStartPos;
+        
+        // Get current step size from main program (pitch setting)
+        extern int stepSize;
+        
+        // Calculate Z movement: stepSize per ENCODER_PPR counts (one revolution)
+        // spindleDelta / ENCODER_PPR = number of spindle revolutions
+        // Z movement = revolutions * stepSize (in steps)
+        int32_t zMovement = (spindleDelta * stepSize) / (ENCODER_PPR * 4); // *4 for quadrature
+        int32_t targetZ = turning.startZPos + zMovement;
+        
+        // Check if we've reached the target distance (40mm = 32000 steps)
+        if (abs(currentZPos - turning.startZPos) >= 32000) {
+          stopAxis(1); // Stop Z-axis
+          turning.state = TURNING_RETRACTING;
+          Serial.printf("Pass %d: 40mm feed complete (pitch=%d), retracting X\n", turning.currentPass, stepSize);
+        } else {
+          // Move Z synchronized with spindle at current pitch setting
+          moveAbsolute(1, targetZ, false);
+        }
+      }
+      break;
+      
+    case TURNING_RETRACTING:
+      // X-axis retracts 1mm (1000 steps)
+      if (!isMoving(0)) {
+        moveRelative(0, -1000, false); // Retract 1mm
+        turning.state = TURNING_RETURNING;
+        Serial.printf("Pass %d: X retracted 1mm, returning Z to start\n", turning.currentPass);
+      }
+      break;
+      
+    case TURNING_RETURNING:
+      // Z-axis returns to start position quickly
+      if (!isMoving(1)) {
+        moveAbsolute(1, turning.startZPos, false); // Return to start
+        turning.state = TURNING_ADVANCING;
+        Serial.printf("Pass %d: Z returned to start, advancing X\n", turning.currentPass);
+      }
+      break;
+      
+    case TURNING_ADVANCING:
+      // X-axis advances back to original position
+      if (!isMoving(0)) {
+        moveAbsolute(0, turning.startXPos, false); // Return to start position
+        
+        // Check if we've completed all passes
+        if (turning.currentPass >= 3) {
+          Serial.println("All 3 turning passes complete!");
+          stopTurningMode();
+        } else {
+          // Prepare for next pass - wait for same spindle position
+          turning.currentPass++;
+          turning.state = TURNING_IDLE;
+          turning.waitingForSync = true;
+          Serial.printf("Pass %d complete, waiting for spindle sync for pass %d\n", 
+                       turning.currentPass - 1, turning.currentPass);
+        }
+      }
+      break;
+  }
 }
