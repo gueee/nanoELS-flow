@@ -1,0 +1,1 @@
+4. Implement ESP32-S3 hardware PCNT for encoders

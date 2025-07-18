@@ -1,0 +1,74 @@
+#define ENCODER_PPR 600
+#define PULSE_PER_REVOLUTION 600
+#define ENC_A 13
+#define ENC_B 14
+#define Z_ENA 41
+#define Z_DIR 42
+#define Z_STEP 35
+#define Z_PULSE_A 18
+#define Z_PULSE_B 8
+#define X_ENA 16
+#define X_DIR 15
+#define X_STEP 7
+#define X_PULSE_A 47
+#define X_PULSE_B 21
+#define KEY_DATA 37
+#define KEY_CLOCK 36
+
+// Nextion Display pins (Serial1)
+#define NEXTION_TX 43
+#define NEXTION_RX 44
+
+#define B_LEFT 68 // Left arrow - controls Z axis movement to the left
+#define B_RIGHT 75 // Right arrow - controls Z axis movement to the right
+#define B_UP 85 // Up arrow - controls X axis movement forwards
+#define B_DOWN 72 // Down arrow - controls X axis movement backwards
+#define B_MINUS 73 // Numpad minus - recrements the pitch or number of passes
+#define B_PLUS 87 // Numpad plus - increments the pitch or number of passes
+#define B_ON 50 // Enter - starts operation or mode
+#define B_OFF 145 // ESC - stops operation or mode
+#define B_STOPL 83 // a - sets left stop
+#define B_STOPR 91 // d - sets right stop
+#define B_STOPU 78 // w - sets forward stop
+#define B_STOPD 89 // s - sets rear stop
+#define B_DISPL 102 // Win - changes info displayed in the bottom line (angle, rpm, ...)
+#define B_STEP 94 // Tilda - changes distance moved when movement buttons are used
+#define B_SETTINGS 74 // Context menu - not used currently
+#define B_MEASURE 66 // m - controls metric / imperial / tpi
+#define B_REVERSE 148 // r - changes pitch sign (left / right thread)
+#define B_DIAMETER 22 // o - sets X0 so that centerline is at the middle of a given diameter value
+#define B_0 84 // 0 top row - for number entry
+#define B_1 71 // 1 top row
+#define B_2 26 // ...
+#define B_3 27
+#define B_4 70
+#define B_5 20
+#define B_6 65
+#define B_7 82
+#define B_8 19
+#define B_9 81
+#define B_BACKSPACE 29 // removes the last entered number
+#define B_MODE_GEARS 31 // F1 - sets the mode to gearbox
+#define B_MODE_TURN 24 // F2 - ...
+#define B_MODE_FACE 147 // F3
+#define B_MODE_CONE 17 // F4
+#define B_MODE_CUT 92 // F5
+#define B_MODE_THREAD 18 // F6
+#define B_MODE_ASYNC 101 // F7
+#define B_MODE_ELLIPSE 10 // F8
+#define B_MODE_GCODE 28 // F9
+#define B_MODE_Y 88 // F10
+#define B_X 139 // x - zeroes X axis
+#define B_Z 99 // z - zeroes Z axis
+#define B_X_ENA 93 // c - enables / disables X axis
+#define B_Z_ENA 74 // q - enables / disables Z axis
+
+  // Debug.
+  Serial.begin(115200);
+
+  // Nextion.
+  Serial1.begin(115200, SERIAL_8N1, 44, 43);
+
+  // Initialize the keyboard.
+  keyboard.begin(KEY_DATA, KEY_CLOCK);
+  xTaskCreatePinnedToCore(taskKeypad, "taskKeypad", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);

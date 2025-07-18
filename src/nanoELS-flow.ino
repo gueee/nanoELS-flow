@@ -244,23 +244,23 @@ void handleKeyboard() {
     // Process key according to MyHardware.txt mappings
     switch (key) {
       case B_LEFT:   // Z-axis left
-        esp32Motion.moveRelative(1, -stepSize, true);  // Blocking move
-        Serial.println("Z-axis moved left " + String(stepSize) + " steps");
+        esp32Motion.moveRelative(1, -stepSize);
+        Serial.println("Z-axis moving left");
         break;
         
       case B_RIGHT:  // Z-axis right  
-        esp32Motion.moveRelative(1, stepSize, true);   // Blocking move
-        Serial.println("Z-axis moved right " + String(stepSize) + " steps");
+        esp32Motion.moveRelative(1, stepSize);
+        Serial.println("Z-axis moving right");
         break;
         
       case B_UP:     // X-axis forward
-        esp32Motion.moveRelative(0, stepSize, true);   // Blocking move
-        Serial.println("X-axis moved forward " + String(stepSize) + " steps");
+        esp32Motion.moveRelative(0, stepSize);
+        Serial.println("X-axis moving forward");
         break;
         
       case B_DOWN:   // X-axis backward
-        esp32Motion.moveRelative(0, -stepSize, true);  // Blocking move
-        Serial.println("X-axis moved backward " + String(stepSize) + " steps");
+        esp32Motion.moveRelative(0, -stepSize);
+        Serial.println("X-axis moving backward");
         break;
         
       case B_OFF:    // IMMEDIATE EMERGENCY STOP - CRITICAL SAFETY
