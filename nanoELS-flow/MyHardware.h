@@ -4,9 +4,8 @@
 // Hardware pin definitions for ESP32-S3-dev board (H5 variant)
 // CRITICAL: These pin assignments are PERMANENT and must never be changed
 
-// Encoder configuration
-#define ENCODER_PPR 600
-#define PULSE_PER_REVOLUTION 600
+// Encoder configuration moved to setup section in main .ino file
+// ENCODER_PPR and PULSE_PER_REVOLUTION now defined as const variables
 
 // Spindle encoder pins (PCNT_UNIT_0)
 #define ENC_A 13

@@ -14,69 +14,13 @@
  */
 
 /* ====================================================================== */
-/* Change values in this section to suit your hardware.                  */
+/* Hardware setup constants are now in SetupConstants.cpp               */
+/* Edit SetupConstants.cpp to modify your hardware configuration.       */
 /* ====================================================================== */
 
-// Hardware definition (do not change for H5 variant)
+// Hardware version defines (keep in main file for Arduino IDE)
 #define HARDWARE_VERSION 5
 #define SOFTWARE_VERSION 1
-
-// Spindle rotary encoder setup
-const int ENCODER_PPR = 600;      // Pulses per revolution of spindle encoder
-const int ENCODER_BACKLASH = 3;   // Number of pulses encoder can issue without spindle movement
-
-// WiFi Configuration
-const bool WIFI_ENABLED = true;
-const char* HOME_WIFI_SSID = "Holzweg_131";           // Your WiFi network name
-const char* HOME_WIFI_PASSWORD = "Holzweg131-mesh";   // Your WiFi password
-
-// Main lead screw (Z-axis) parameters
-const long SCREW_Z_DU = 50000;           // Lead screw pitch in deci-microns (5mm = 50000 du)
-const long MOTOR_STEPS_Z = 4000;         // Motor steps per revolution
-const long SPEED_START_Z = MOTOR_STEPS_Z;     // Initial speed, steps/second
-const long ACCELERATION_Z = 25 * MOTOR_STEPS_Z;  // Acceleration, steps/second²
-const long SPEED_MANUAL_MOVE_Z = 8 * MOTOR_STEPS_Z;  // Max manual speed, steps/second
-const bool INVERT_Z = false;             // Invert direction if carriage moves wrong way
-const bool INVERT_Z_ENABLE = true;       // Enable pin inversion (true = active-LOW)
-const bool INVERT_Z_STEP = true;         // Step pin inversion for level shifting
-const bool NEEDS_REST_Z = false;         // Set false for closed-loop drivers
-const long MAX_TRAVEL_MM_Z = 300;        // Maximum Z travel in mm
-const long BACKLASH_DU_Z = 0;           // Backlash compensation in deci-microns
-
-// Cross-slide lead screw (X-axis) parameters  
-const long SCREW_X_DU = 40000;           // Lead screw pitch in deci-microns (4mm = 40000 du)
-const long MOTOR_STEPS_X = 4000;         // Motor steps per revolution
-const long SPEED_START_X = MOTOR_STEPS_X;     // Initial speed, steps/second
-const long ACCELERATION_X = 25 * MOTOR_STEPS_X;  // Acceleration, steps/second²
-const long SPEED_MANUAL_MOVE_X = 8 * MOTOR_STEPS_X;  // Max manual speed, steps/second
-const bool INVERT_X = true;              // Invert direction if carriage moves wrong way
-const bool INVERT_X_ENABLE = true;       // Enable pin inversion (true = active-LOW)
-const bool INVERT_X_STEP = true;         // Step pin inversion for level shifting
-const bool NEEDS_REST_X = false;         // Set false for closed-loop drivers
-const long MAX_TRAVEL_MM_X = 100;        // Maximum X travel in mm
-const long BACKLASH_DU_X = 0;           // Backlash compensation in deci-microns
-
-// Manual stepping configuration
-const long STEP_TIME_MS = 500;           // Time for one manual step in milliseconds
-const long DELAY_BETWEEN_STEPS_MS = 80;  // Pause between manual steps in milliseconds
-
-// Motion control limits (converted to our system internally)
-const float MAX_VELOCITY_X_USER = 50.0;  // Maximum X velocity in mm/s
-const float MAX_VELOCITY_Z_USER = 50.0;  // Maximum Z velocity in mm/s
-const float MAX_ACCELERATION_X_USER = 500.0;  // Maximum X acceleration in mm/s²
-const float MAX_ACCELERATION_Z_USER = 500.0;  // Maximum Z acceleration in mm/s²
-
-// Advanced settings (normally no need to change)
-const long INCOMING_BUFFER_SIZE = 100000;  // WebSocket input buffer size
-const long OUTGOING_BUFFER_SIZE = 100000;  // WebSocket output buffer size
-const long SAVE_DELAY_US = 5000000;        // Wait 5s before auto-saving preferences
-const long DIRECTION_SETUP_DELAY_US = 5;   // Delay after direction change
-const long STEPPED_ENABLE_DELAY_MS = 100;  // Delay after enable before stepping
-
-// PID controller tuning (for fine positioning)
-const float PID_KP = 10.0;    // Proportional gain
-const float PID_KI = 0.1;     // Integral gain  
-const float PID_KD = 0.05;    // Derivative gain
 
 /* ====================================================================== */
 /* Changing anything below shouldn't be needed for basic use.            */
@@ -94,6 +38,7 @@ const float PID_KD = 0.05;    // Derivative gain
 #include <PS2KeyAdvanced.h>
 
 // Project modules - Clean minimal implementation with motion control
+#include "SetupConstants.h"      // Hardware configuration constants
 #include "ESP32MotionControl.h"
 #include "WebInterface.h"
 #include "NextionDisplay.h"
@@ -305,36 +250,38 @@ void handleKeyboard() {
     
     // Process key according to MyHardware.txt mappings
     switch (key) {
-      case B_ON:     // ENTER - Start/Restart test sequence
-        if (esp32Motion.getEmergencyStop()) {
-          // Release emergency stop
-          esp32Motion.setEmergencyStop(false);
-          nextionDisplay.setState(DISPLAY_STATE_NORMAL);
-          Serial.println("Emergency stop released - Press ENTER again to start test");
-        } else if (esp32Motion.isTestSequenceActive()) {
-          // Restart if already running
-          Serial.println("Restarting test sequence...");
-          esp32Motion.restartTestSequence();
-        } else {
-          // Start fresh or restart after completion
-          if (esp32Motion.isTestSequenceCompleted()) {
-            Serial.println("Restarting completed test sequence...");
+      case B_ON:     // ENTER - Start/Restart test sequence (only when not in emergency)
+        if (!esp32Motion.getEmergencyStop()) {
+          if (esp32Motion.isTestSequenceActive()) {
+            // Restart if already running
             esp32Motion.restartTestSequence();
           } else {
-            Serial.println("Starting test sequence...");
-            esp32Motion.startTestSequence();
+            // Start fresh or restart after completion
+            if (esp32Motion.isTestSequenceCompleted()) {
+              esp32Motion.restartTestSequence();
+            } else {
+              esp32Motion.startTestSequence();
+            }
           }
+        } else {
+          // Show message on display that emergency stop is active
+          nextionDisplay.showMessage("E-STOP ACTIVE - Press ESC");
         }
         break;
         
-      case B_OFF:    // ESC - IMMEDIATE EMERGENCY STOP
-        // Set emergency flag for ultra-fast response
-        emergencyKeyDetected = true;
-        // Also handle immediately here for redundancy
-        esp32Motion.setEmergencyStop(true);
-        esp32Motion.stopTestSequence();
-        nextionDisplay.showEmergencyStop();
-        Serial.println("*** EMERGENCY STOP ACTIVATED - Test sequence stopped ***");
+      case B_OFF:    // ESC - Toggle emergency stop (clear if active, activate if clear)
+        if (esp32Motion.getEmergencyStop()) {
+          // Clear emergency stop
+          esp32Motion.setEmergencyStop(false);
+          nextionDisplay.setState(DISPLAY_STATE_NORMAL);
+          nextionDisplay.showMessage("SYSTEM READY");
+        } else {
+          // Activate emergency stop
+          emergencyKeyDetected = true;
+          esp32Motion.setEmergencyStop(true);
+          esp32Motion.stopTestSequence();
+          nextionDisplay.showEmergencyStop();
+        }
         break;
         
       // Manual movement controls
@@ -344,11 +291,14 @@ void handleKeyboard() {
           float targetPos = currentPos - manualStepSize;
           if (esp32Motion.isPositionSafe(1, targetPos)) {
             esp32Motion.setTargetPosition(1, targetPos);
-            Serial.printf("Z-axis moving left: %.3f -> %.3f mm (step=%.3f)\n", 
-                         currentPos, targetPos, manualStepSize);
+            nextionDisplay.showMessage("Z← " + String(manualStepSize) + "mm");
           } else {
-            Serial.println("Z-axis movement blocked - position unsafe");
+            nextionDisplay.showMessage("Z limit reached");
           }
+        } else if (esp32Motion.getEmergencyStop()) {
+          nextionDisplay.showMessage("E-STOP - Press ESC");
+        } else {
+          nextionDisplay.showMessage("TEST RUNNING");
         }
         break;
         
@@ -358,11 +308,14 @@ void handleKeyboard() {
           float targetPos = currentPos + manualStepSize;
           if (esp32Motion.isPositionSafe(1, targetPos)) {
             esp32Motion.setTargetPosition(1, targetPos);
-            Serial.printf("Z-axis moving right: %.3f -> %.3f mm (step=%.3f)\n", 
-                         currentPos, targetPos, manualStepSize);
+            nextionDisplay.showMessage("Z→ " + String(manualStepSize) + "mm");
           } else {
-            Serial.println("Z-axis movement blocked - position unsafe");
+            nextionDisplay.showMessage("Z limit reached");
           }
+        } else if (esp32Motion.getEmergencyStop()) {
+          nextionDisplay.showMessage("E-STOP - Press ESC");
+        } else {
+          nextionDisplay.showMessage("TEST RUNNING");
         }
         break;
         
@@ -372,11 +325,14 @@ void handleKeyboard() {
           float targetPos = currentPos + manualStepSize;
           if (esp32Motion.isPositionSafe(0, targetPos)) {
             esp32Motion.setTargetPosition(0, targetPos);
-            Serial.printf("X-axis moving forward: %.3f -> %.3f mm (step=%.3f)\n", 
-                         currentPos, targetPos, manualStepSize);
+            nextionDisplay.showMessage("X↑ " + String(manualStepSize) + "mm");
           } else {
-            Serial.println("X-axis movement blocked - position unsafe");
+            nextionDisplay.showMessage("X limit reached");
           }
+        } else if (esp32Motion.getEmergencyStop()) {
+          nextionDisplay.showMessage("E-STOP - Press ESC");
+        } else {
+          nextionDisplay.showMessage("TEST RUNNING");
         }
         break;
         
@@ -386,11 +342,14 @@ void handleKeyboard() {
           float targetPos = currentPos - manualStepSize;
           if (esp32Motion.isPositionSafe(0, targetPos)) {
             esp32Motion.setTargetPosition(0, targetPos);
-            Serial.printf("X-axis moving backward: %.3f -> %.3f mm (step=%.3f)\n", 
-                         currentPos, targetPos, manualStepSize);
+            nextionDisplay.showMessage("X↓ " + String(manualStepSize) + "mm");
           } else {
-            Serial.println("X-axis movement blocked - position unsafe");
+            nextionDisplay.showMessage("X limit reached");
           }
+        } else if (esp32Motion.getEmergencyStop()) {
+          nextionDisplay.showMessage("E-STOP - Press ESC");
+        } else {
+          nextionDisplay.showMessage("TEST RUNNING");
         }
         break;
         
@@ -404,44 +363,48 @@ void handleKeyboard() {
         } else {
           manualStepSize = 0.01;
         }
-        Serial.printf("Manual step size changed to: %.3f mm\n", manualStepSize);
+        nextionDisplay.showMessage("Step: " + String(manualStepSize) + "mm");
         break;
         
-      case B_X_ENA:  // c - Enable/disable X axis
+      case B_X_ENA:  // c - Enable/disable X axis (works even during emergency stop)
         if (!esp32Motion.isTestSequenceActive()) {
           if (esp32Motion.isAxisEnabled(0)) {
             esp32Motion.disableAxis(0);
-            Serial.println("X-axis DISABLED");
+            nextionDisplay.showMessage("X-axis OFF");
           } else {
             esp32Motion.enableAxis(0);
-            Serial.println("X-axis ENABLED");
+            nextionDisplay.showMessage("X-axis ON");
           }
+        } else {
+          nextionDisplay.showMessage("Test running");
         }
         break;
         
-      case B_Z_ENA:  // q - Enable/disable Z axis
+      case B_Z_ENA:  // q - Enable/disable Z axis (works even during emergency stop)
         if (!esp32Motion.isTestSequenceActive()) {
           if (esp32Motion.isAxisEnabled(1)) {
             esp32Motion.disableAxis(1);
-            Serial.println("Z-axis DISABLED");
+            nextionDisplay.showMessage("Z-axis OFF");
           } else {
             esp32Motion.enableAxis(1);
-            Serial.println("Z-axis ENABLED");
+            nextionDisplay.showMessage("Z-axis ON");
           }
+        } else {
+          nextionDisplay.showMessage("Test running");
         }
         break;
         
       case B_X:      // x - Zero X axis position
         if (!esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
           esp32Motion.setTargetPosition(0, 0.0);
-          Serial.println("X-axis position zeroed");
+          nextionDisplay.showMessage("X zeroed");
         }
         break;
         
       case B_Z:      // z - Zero Z axis position
         if (!esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
           esp32Motion.setTargetPosition(1, 0.0);
-          Serial.println("Z-axis position zeroed");
+          nextionDisplay.showMessage("Z zeroed");
         }
         break;
         
@@ -456,16 +419,8 @@ void handleKeyboard() {
         break;
         
       default:
-        Serial.println("Key pressed: " + String(key));
-        Serial.println("Manual Controls:");
-        Serial.println("  Arrows: Move axes (current step: " + String(manualStepSize) + "mm)");
-        Serial.println("  ~: Change step size (0.01/0.1/1.0/10.0mm)");
-        Serial.println("  c/q: Enable/disable X/Z axis");
-        Serial.println("  x/z: Zero axis positions");
-        Serial.println("Test Controls:");
-        Serial.println("  ENTER: Start/Release E-Stop");
-        Serial.println("  ESC: Emergency Stop");
-        Serial.println("  Win: Diagnostics");
+        // Unknown key - show step size as feedback
+        nextionDisplay.showMessage("Step: " + String(manualStepSize) + "mm");
         break;
     }
   }
