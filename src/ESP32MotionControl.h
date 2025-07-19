@@ -2,127 +2,215 @@
 #define ESP32MOTIONCONTROL_H
 
 #include <Arduino.h>
-#include "CircularBuffer.h"
 #include "MyHardware.h"
 
 /**
- * ESP32MotionControl - Task-Based ESP32-S3 Motion Control System
+ * ESP32MotionControl - PID Position Controller for ClearPath Servos
  * 
- * This version uses FreeRTOS tasks for motion control instead of hardware timers
- * for maximum Arduino ESP32 Core compatibility:
- * 1. Task-based stepper pulse generation
- * 2. Interrupt-based encoder counting (optimized)
- * 3. Real-time motion queue with circular buffer
- * 4. Compatible with all Arduino ESP32 Core versions
+ * Simple servo-like position controller:
+ * 1. Target position input
+ * 2. PID control loop
+ * 3. Step/Direction output for ClearPath servos
+ * 4. Position feedback simulation
+ * 5. Test motion sequences
  */
 
-// Motion command structure
-struct MotionCommand {
-    enum Type {
-        MOVE_RELATIVE,
-        MOVE_ABSOLUTE, 
-        SET_SPEED,
-        SET_ACCELERATION,
-        STOP_AXIS,
-        ENABLE_AXIS,
-        DISABLE_AXIS
-    } type;
+// Hardware configuration constants (based on h5.ino pattern)
+// These should match your hardware setup
+const bool INVERT_X = true;           // X-axis direction inversion
+const bool INVERT_Z = false;          // Z-axis direction inversion
+const bool INVERT_X_ENABLE = true;    // X-axis enable pin inversion (active-LOW)
+const bool INVERT_Z_ENABLE = true;    // Z-axis enable pin inversion (active-LOW)
+const bool INVERT_X_STEP = true;      // X-axis step pin inversion (level shifting)
+const bool INVERT_Z_STEP = true;      // Z-axis step pin inversion (level shifting)
+
+// Motion limits (conservative for testing)
+const float MAX_TRAVEL_MM_X = 50.0;   // X-axis travel limit
+const float MAX_TRAVEL_MM_Z = 50.0;   // Z-axis travel limit
+const float MAX_VELOCITY_X = 50.0;    // X-axis max velocity (mm/s)
+const float MAX_VELOCITY_Z = 50.0;    // Z-axis max velocity (mm/s)
+const float MAX_ACCELERATION_X = 500.0; // X-axis max acceleration (mm/s²)
+const float MAX_ACCELERATION_Z = 500.0; // Z-axis max acceleration (mm/s²)
+
+// Fixed-point math definitions (Q24.8 format like ClearPath)
+#define FIXED_POINT_SHIFT 8
+#define FIXED_POINT_SCALE (1 << FIXED_POINT_SHIFT)  // 256
+#define FLOAT_TO_FIXED(x) ((int32_t)((x) * FIXED_POINT_SCALE))
+#define FIXED_TO_FLOAT(x) ((float)(x) / FIXED_POINT_SCALE)
+
+// Motion profile structure (inspired by ClearPath)
+struct MotionProfile {
+    enum Phase {
+        IDLE,
+        ACCELERATION,
+        CONSTANT_VELOCITY,
+        DECELERATION,
+        COMPLETED
+    } currentPhase;
     
-    uint8_t axis;           // 0=X, 1=Z
-    int32_t value;          // Steps, speed, or target position
-    uint32_t timestamp;     // Execution time (microseconds)
-    bool blocking;          // Wait for completion
+    // Fixed-point position values (Q24.8 format)
+    int32_t targetPosition;     // Target position in fixed-point
+    int32_t currentPosition;    // Current position in fixed-point
+    int32_t startPosition;      // Move start position
+    
+    // Velocity profile parameters (fixed-point)
+    int32_t maxVelocity;        // Maximum velocity (steps/sec * 256)
+    int32_t maxAcceleration;    // Maximum acceleration (steps/sec² * 256)
+    int32_t currentVelocity;    // Current velocity (steps/sec * 256)
+    
+    // Pre-computed motion parameters
+    int32_t accelDistance;      // Distance to accelerate
+    int32_t decelDistance;      // Distance to decelerate
+    int32_t totalDistance;      // Total move distance
+    int32_t accelTime;          // Time to accelerate (ms * 256)
+    int32_t constantTime;       // Time at constant velocity
+    int32_t decelTime;          // Time to decelerate
+    
+    // Motion state
+    uint32_t phaseStartTime;    // Phase start time (ms)
+    uint32_t moveStartTime;     // Move start time (ms)
+    bool moveActive;            // Move in progress
+    bool moveCompleted;         // Move completed flag
 };
 
-// Axis configuration
+// PID Controller structure (enhanced with fixed-point)
+struct PIDController {
+    int32_t kP;              // Proportional gain (fixed-point)
+    int32_t kI;              // Integral gain (fixed-point)
+    int32_t kD;              // Derivative gain (fixed-point)
+    
+    int32_t lastError;       // Previous error for derivative (fixed-point)
+    int32_t integral;        // Accumulated error for integral (fixed-point)
+    int32_t maxOutput;       // Maximum output limit (fixed-point)
+    int32_t minOutput;       // Minimum output limit (fixed-point)
+    
+    uint32_t lastUpdateTime; // For derivative calculation
+};
+
+// Enhanced servo axis configuration (ClearPath inspired)
 struct AxisConfig {
     // GPIO configuration
     uint8_t stepPin;
     uint8_t dirPin;
     uint8_t enablePin;
     
-    // Motion parameters
-    volatile int32_t position;      // Current position in steps
-    int32_t targetPosition;         // Target position
-    uint32_t currentSpeed;          // Current speed in Hz
-    uint32_t targetSpeed;           // Target speed in Hz
-    uint32_t maxSpeed;              // Maximum speed in Hz
-    uint32_t acceleration;          // Acceleration in steps/s²
+    // Fixed-point position control (Q24.8 format)
+    volatile int32_t currentPosition;    // Current position in steps (fixed-point)
+    volatile int32_t commandedPosition;  // Commanded position from moves
+    volatile int32_t positionError;      // Position error (fixed-point)
     
-    // Motion timing
-    uint32_t stepInterval;          // Microseconds between steps
-    uint32_t lastStepTime;          // Last step timestamp
+    // Servo specifications (ClearPath CPM-SDSK-2321S)
+    int32_t pulsesPerMM;                // Pulses per mm (fixed-point)
+    int32_t maxVelocity;                // Maximum velocity (steps/sec, fixed-point)
+    int32_t maxAcceleration;            // Maximum acceleration (steps/sec², fixed-point)
+    
+    // Safety limits (in steps, fixed-point)
+    int32_t minPosition;                // Minimum allowed position
+    int32_t maxPosition;                // Maximum allowed position
+    bool limitsEnabled;                 // Software limits enabled
+    
+    // Step generation (deterministic timing)
+    volatile int32_t stepCount;         // Total steps generated
+    volatile int32_t stepsToGo;         // Steps remaining in current move
+    uint32_t stepInterval;              // Current step interval (microseconds)
+    volatile bool stepState;            // Current step pin state
+    volatile bool stepPending;          // Step pulse pending
+    
+    // Motion profile
+    MotionProfile profile;
+    
+    // PID controller (fallback for fine positioning)
+    PIDController pid;
     
     // Status flags
     bool enabled;
     volatile bool moving;
-    bool inverted;
+    bool invertDirection;     // Direction pin inversion
+    bool invertEnable;        // Enable pin inversion
+    bool invertStep;          // Step pin inversion
     
     // Motion state
     enum State {
         IDLE,
-        ACCELERATING,
-        CONSTANT_SPEED,
-        DECELERATING
+        PROFILE_MOVE,      // Using motion profile
+        PID_FOLLOWING,     // Using PID control
+        HOLDING
     } state;
+    
+    // Performance tracking
+    uint32_t lastProfileUpdate;    // Last profile update time
+    uint32_t profileUpdateInterval; // Profile update interval (microseconds)
 };
 
-// Encoder configuration (optimized interrupt-based)
-struct EncoderConfig {
-    uint8_t pinA;
-    uint8_t pinB;
-    volatile int32_t count;
-    volatile int32_t lastCount;
-    int32_t offset;
-    volatile uint32_t errorCount;
-    volatile uint8_t lastState;
-    const char* name;
+// Test sequence configuration
+struct TestSequence {
+    struct Move {
+        float xTarget;    // X target position in mm
+        float zTarget;    // Z target position in mm
+        uint32_t holdTime; // Time to hold position in ms
+    };
     
-    // MPG velocity tracking for smooth acceleration
-    uint32_t lastChangeTime;
-    int32_t velocity;           // Counts per second
-    int32_t lastVelocity;
-    uint32_t velocityUpdateTime;
+    Move moves[4];        // Array of test moves
+    uint8_t currentMove;  // Current move index
+    uint8_t cycleCount;   // Number of cycles completed
+    uint8_t maxCycles;    // Maximum cycles to run
+    uint32_t moveStartTime; // Time when current move started
+    bool active;          // Test sequence active
+    bool completed;       // Test sequence completed
 };
 
 class ESP32MotionControl {
 private:
     // Hardware configuration
-    AxisConfig axes[2];         // X and Z axes
-    EncoderConfig encoders[3];  // Spindle, Z-MPG, X-MPG
+    AxisConfig axes[2];         // X and Z axes (0=X, 1=Z)
     
-    // Motion queue
-    CircularBuffer<MotionCommand, 64> motionQueue;
+    // Test sequence
+    TestSequence testSequence;
     
     // Static instance for ISR access
     static ESP32MotionControl* instance;
     
-    // Motion control task
+    // Motion control task (deterministic timing)
     static void motionControlTask(void* parameter);
     TaskHandle_t motionTaskHandle;
     
-    // Encoder interrupt handlers (optimized)
-    static void IRAM_ATTR encoderISR_Spindle(void);
-    static void IRAM_ATTR encoderISR_XMPG(void);
-    static void IRAM_ATTR encoderISR_ZMPG(void);
+    // Step pulse generation (fixed 2kHz like ClearPath)
+    static void IRAM_ATTR stepGeneratorISR();
+    hw_timer_t* stepGeneratorTimer;
     
-    // Internal methods
-    void updateAxisMotion(int axis);
+    // Internal methods - Motion Profile Based
+    void updateAxisProfile(int axis);
+    void calculateMotionProfile(int axis, int32_t targetPos);
+    void updateProfilePhase(int axis);
+    int32_t calculateProfileVelocity(int axis);
+    
+    // Internal methods - Step Generation
     void generateStepPulse(int axis);
-    void calculateAcceleration(int axis);
-    uint32_t calculateStepInterval(int axis);
+    void updateStepTiming(int axis);
+    void updateStepGeneration(int axis);
     
-    // CRITICAL: Direct MPG control for immediate response
-    void moveDirectMPG(int axis, int32_t steps);
+    // Internal methods - PID Fallback
+    void updateAxisPID(int axis);
+    int32_t calculatePIDOutput(int axis);
     
-    // Smooth MPG control with velocity-based step scaling
-    void moveSmoothMPG(int axis, int32_t steps, int32_t velocity);
-    float calculateMPGStepScale(int32_t velocity);
-    void updateMPGVelocity(int encoderIndex);
+    // Internal methods - Fixed-Point Math
+    int32_t mmToSteps(int axis, float mm);
+    float stepsToMM(int axis, int32_t steps);
+    int32_t calculateAccelDistance(int32_t velocity, int32_t acceleration);
+    int32_t calculateAccelTime(int32_t velocity, int32_t acceleration);
+    
+    // Position control
+    void setAxisTarget(int axis, float targetMM);
+    float getAxisPosition(int axis);
+    
+    // Test sequence methods
+    void initializeTestSequence();
+    void updateTestSequence();
     
     // Hardware initialization
-    bool initializeEncoders();
     void initializeGPIO();
+    void initializePID();
+    void initializeStepTimers();
     
     // Safety
     bool emergencyStop;
@@ -135,17 +223,21 @@ public:
     bool initialize();
     void shutdown();
     
-    // Motion control interface
-    bool moveRelative(int axis, int32_t steps, bool blocking = false);
-    bool moveAbsolute(int axis, int32_t position, bool blocking = false);
-    bool setSpeed(int axis, uint32_t speed);
-    bool setAcceleration(int axis, uint32_t accel);
-    bool stopAxis(int axis);
-    bool stopAll();
+    // Position control interface (enhanced)
+    bool setTargetPosition(int axis, float positionMM);
+    bool moveToPosition(int axis, float positionMM);  // Profile-based move
+    bool moveRelative(int axis, int steps);  // Move relative by steps
+    float getPosition(int axis);
+    float getTargetPosition(int axis);
+    float getPositionError(int axis);
+    bool isMoving(int axis);
+    bool moveCompleted(int axis);
     
-    // Position control
-    int32_t getPosition(int axis);
-    bool setPosition(int axis, int32_t position);
+    // Motion profile interface
+    bool setMotionLimits(int axis, float maxVel, float maxAccel);
+    void getMotionLimits(int axis, float& maxVel, float& maxAccel);
+    MotionProfile::Phase getMotionPhase(int axis);
+    float getProfileVelocity(int axis);
     
     // Axis control
     bool enableAxis(int axis);
@@ -153,22 +245,26 @@ public:
     bool isAxisEnabled(int axis);
     bool isAxisMoving(int axis);
     
-    // Encoder interface
-    int32_t getEncoderCount(int encoderIndex);
-    void resetEncoderCount(int encoderIndex);
-    int32_t getSpindlePosition() { return getEncoderCount(0); }
-    int32_t getXMPGCount() { return getEncoderCount(2); }
-    int32_t getZMPGCount() { return getEncoderCount(1); }
+    // Test sequence control
+    void startTestSequence();
+    void stopTestSequence();
+    void restartTestSequence();
+    bool isTestSequenceActive();
+    bool isTestSequenceCompleted();
+    String getTestSequenceStatus();
     
-    // Queue management
-    bool queueCommand(const MotionCommand& cmd);
-    void processMotionQueue();
-    void clearMotionQueue();
-    size_t getQueueSize() { return motionQueue.size(); }
+    // PID tuning
+    void setPIDGains(int axis, float kP, float kI, float kD);
+    void getPIDGains(int axis, float& kP, float& kI, float& kD);
     
     // Safety
     void setEmergencyStop(bool stop);
     bool getEmergencyStop() { return emergencyStop; }
+    
+    // Safety limits
+    bool setSoftwareLimits(int axis, float minMM, float maxMM);
+    void getSoftwareLimits(int axis, float& minMM, float& maxMM);
+    bool isPositionSafe(int axis, float positionMM);
     
     // Status and diagnostics
     String getStatusReport();
@@ -177,13 +273,12 @@ public:
     // Update method (call from main loop)
     void update();
     
-    // MPG interface
-    void processMPGInputs();
-    
-    // Placeholder methods for compatibility
-    bool startTurningMode(float feedRatio, int passes);
-    bool stopTurningMode();
-    bool isTurningModeActive();
+    // Compatibility methods for display
+    int32_t getSpindlePosition() { return 0; }
+    int32_t getXMPGCount() { return 0; }
+    int32_t getZMPGCount() { return 0; }
+    int32_t getAxisMPGTargetPosition(int axis) { return (int32_t)(getTargetPosition(axis) * 1000); }
+    uint32_t getAxisStepCount(int axis) { return (axis >= 0 && axis < 2) ? axes[axis].stepCount : 0; }
 };
 
 // Global instance

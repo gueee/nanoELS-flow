@@ -16,44 +16,45 @@ nanoELS-flow is a complete rewrite of the nanoELS Electronic Lead Screw controll
 
 ## Development Environment Setup
 
-### Build System Commands
-**Note**: PlatformIO is located at `~/.platformio/penv/bin/pio`
-
-- **Build**: `~/.platformio/penv/bin/pio run -e esp32-s3-devkitc-1`
-- **Upload**: `~/.platformio/penv/bin/pio run -e esp32-s3-devkitc-1 --target upload`
-- **Clean**: `~/.platformio/penv/bin/pio run --target clean`
-- **Monitor**: `~/.platformio/penv/bin/pio device monitor --baud 115200`
-- **Check/Lint**: `~/.platformio/penv/bin/pio check` (uses cppcheck)
-- **Build and Upload**: `~/.platformio/penv/bin/pio run -e esp32-s3-devkitc-1 --target upload --target monitor`
-
-### Quick Development Commands
-- **Full cycle**: `~/.platformio/penv/bin/pio run -e esp32-s3-devkitc-1 --target upload --target monitor`
-- **List devices**: `~/.platformio/penv/bin/pio device list`
-- **Verbose build**: `~/.platformio/penv/bin/pio run -e esp32-s3-devkitc-1 -v`
-- **Force rebuild**: `~/.platformio/penv/bin/pio run -e esp32-s3-devkitc-1 --target clean --target upload`
-
-### Development Setup
-- **Platform**: PlatformIO with ESP32-S3 support
-- **Target Board**: esp32-s3-devkitc-1
+### Arduino IDE Setup (Primary Development Environment)
+- **Arduino IDE Version**: 2.3.6 or later
+- **Board**: ESP32S3 Dev Module
 - **Framework**: Arduino framework for ESP32
-- **Arduino IDE Version**: 2.3.6
-- **Upload Port**: /dev/ttyUSB0 (modify in platformio.ini if needed)
+- **Upload Port**: /dev/ttyUSB0 (select appropriate port in IDE)
 
-### Project Structure
+### ESP32 Board Manager Configuration
+Add to Arduino IDE Board Manager URLs:
 ```
-/
-├── nanoELS-flow/           # Arduino IDE compatible folder
-│   ├── nanoELS-flow.ino   # Main application file
-│   ├── ESP32MotionControl.h/.cpp  # Native ESP32-S3 motion control
-│   ├── NextionDisplay.h/.cpp      # Touch screen interface
-│   ├── WebInterface.h/.cpp        # HTTP server and WebSocket
-│   ├── CircularBuffer.h           # Real-time circular buffer
-│   ├── MyHardware.h/.txt          # Pin definitions (authoritative)
-│   └── indexhtml.h               # Embedded web interface
-├── src/                    # PlatformIO build folder (mirrors nanoELS-flow/)
-├── platformio.ini          # PlatformIO configuration
-└── README.md              # Project documentation
+https://espressif.github.io/arduino-esp32/package_esp32_index.json
 ```
+
+### Board Settings (ESP32S3 Dev Module)
+- **CPU Frequency**: 240MHz
+- **Flash Mode**: QIO  
+- **Flash Size**: 16MB
+- **Partition Scheme**: Huge APP (3MB No OTA/1MB SPIFFS)
+- **PSRAM**: Enabled
+- **Upload Speed**: 921600
+- **USB Mode**: Hardware CDC and JTAG
+
+### Project Structure (Arduino IDE)
+```
+nanoELS-flow/                      # Arduino IDE project folder
+├── nanoELS-flow.ino              # Main application file with setup section
+├── ESP32MotionControl.h/.cpp     # Native ESP32-S3 motion control
+├── NextionDisplay.h/.cpp         # Touch screen interface  
+├── WebInterface.h/.cpp           # HTTP server and WebSocket
+├── StateMachine.h/.cpp           # Non-blocking state machine
+├── CircularBuffer.h              # Real-time circular buffer
+├── SetupConstants.h              # User-editable setup constants
+├── MyHardware.h/.txt            # Pin definitions (authoritative)
+└── indexhtml.h                  # Embedded web interface
+```
+
+**Key Files:**
+- **nanoELS-flow.ino**: Main application with user-editable setup section
+- **SetupConstants.h**: Header for Arduino IDE compatibility with setup constants
+- **MyHardware.txt**: Authoritative pin definitions and keyboard mappings
 
 ## Code Architecture
 
@@ -152,36 +153,31 @@ The system supports two WiFi modes (set `WIFI_MODE` in main .ino file):
 - **Motion Control**: Task-based stepper control with acceleration profiles
 - **Display**: Real-time status and position updates
 
-### Library Dependencies and Versions
-Key libraries specified in `platformio.ini`:
-- **WebSockets**: For WebSocket communication
-- **PS2KeyAdvanced**: For PS2 keyboard interface
+### Library Dependencies
+Required libraries (install via Arduino IDE Library Manager):
+- **WebSockets by Markus Sattler**: For WebSocket communication
+- **PS2KeyAdvanced by Paul Carpenter**: For PS2 keyboard interface
 - **Native ESP32-S3**: No external stepper libraries - uses ESP32 hardware directly
 
-#### ESP32-S3 Build Configuration
-- **Platform**: espressif32
-- **Framework**: Arduino
-- **CPU Frequency**: 240MHz
-- **Flash Mode**: QIO
-- **Partitions**: huge_app.csv (for large application)
-- **PSRAM**: Enabled with cache fix
-- **Upload Speed**: 921600 baud
-- **Debug Level**: 0 (production)
+### Development Libraries (Built-in with ESP32 Core)
+- **WiFi**: ESP32 WiFi functionality
+- **WebServer**: HTTP server capabilities
+- **Preferences**: Configuration storage
+- **LittleFS**: File system support
 
 ### File Organization Rules
-- **Main application**: `nanoELS-flow/nanoELS-flow.ino` (Arduino IDE compatible)
+- **Main application**: `nanoELS-flow/nanoELS-flow.ino` (Arduino IDE project)
+- **Setup constants**: `nanoELS-flow/SetupConstants.h` (user-editable configuration)
 - **Hardware definitions**: `nanoELS-flow/MyHardware.txt` (authoritative pin mappings)
 - **Core modules**: `nanoELS-flow/*.h` and `nanoELS-flow/*.cpp` (modular architecture)
 - **Web assets**: `nanoELS-flow/indexhtml.h` (embedded web interface)
-- **PlatformIO build**: `src/` folder (mirrors nanoELS-flow/ for compilation)
 
 ## PROJECT RULES - MANDATORY FOR ALL DEVELOPMENT
 
 ### Primary Target Hardware
 - **CURRENT TARGET**: H5 variant ONLY (ESP32-S3-dev board)
-- **Board**: ESP32-S3-dev board
+- **Board**: ESP32S3 Dev Module (Arduino IDE)
 - **Framework**: Arduino framework for ESP32-S3
-- **PlatformIO Environment**: esp32-s3-devkitc-1
 
 ### Hardware Specifications - H5 Variant
 - **MCU**: ESP32-S3 with dual-core CPU
@@ -294,9 +290,9 @@ Key libraries specified in `platformio.ini`:
 - MPG debug output shows velocity and scaling information
 
 ### Development Environment
-- Arduino IDE version 2.3.6
-- PlatformIO located at `~/.platformio/penv/bin/pio`
-- Dual folder structure: `nanoELS-flow/` (Arduino IDE) and `src/` (PlatformIO)
+- **Arduino IDE version 2.3.6** (primary development environment)
+- **Single folder structure**: `nanoELS-flow/` contains all project files
+- **Setup section**: User-editable constants at top of main .ino file
 
 **CRITICAL REMINDERS**:
 1. Target is ESP32-S3-dev board (H5 variant) ONLY
@@ -307,6 +303,22 @@ Key libraries specified in `platformio.ini`:
 6. Y-axis is NOT implemented - ignore completely
 7. MPG control uses velocity-based step scaling for smooth operation
 
+## Project Testing Notes
+
+### Testing Approach
+- **No serial output**: I test on the actual machine and measure movements using a dial gauge
+
 ## License
 
 This project is licensed under GPL-3.0, maintaining compatibility with the original nanoELS project while allowing for the complete rewrite approach.
+
+## Project Memories and Notes
+
+### Critical System Constraints
+- **Pulse Generation Rule**: Pulse generation must not be blocked or delayed at any time, this is a high priority task!
+
+### Emergency Stop Constraints
+- **Emergency stop must be recognized under any circumstance!**
+
+### Memory: Schematics Reference
+- `@nanoELS-flow/schematics.png`: Reference schematic for project hardware configuration

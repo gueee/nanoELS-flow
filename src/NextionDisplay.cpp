@@ -129,11 +129,17 @@ void NextionDisplay::showWiFiStatus(const String& status, bool connecting) {
 void NextionDisplay::showMotionStatus() {
   // Top line: Mode and status (matching original h5.ino format)
   extern int currentMode;
-  extern int stepSize;
+  extern float manualStepSize;
   String topLine = "";
-  if (esp32Motion.getEmergencyStop()) {
+  
+  // Dummy values for clean display - no motion control
+  bool emergencyStop = false;
+  bool xMoving = false;
+  bool zMoving = false;
+  
+  if (emergencyStop) {
     topLine = "EMERGENCY STOP";
-  } else if (esp32Motion.isAxisMoving(0) || esp32Motion.isAxisMoving(1)) {
+  } else if (xMoving || zMoving) {
     topLine = "MOVING - ";
     switch(currentMode) {
       case 0: topLine += "Manual"; break;
@@ -154,7 +160,7 @@ void NextionDisplay::showMotionStatus() {
       case 5: topLine = "Cutting"; break;
       default: topLine = "Mode " + String(currentMode); break;
     }
-    topLine += " Step:" + String(stepSize);
+    topLine += " Step:" + String(manualStepSize) + "mm";
   }
   setTopLine(topLine);
   
@@ -163,23 +169,42 @@ void NextionDisplay::showMotionStatus() {
   setPitchLine(pitchLine);
   
   // Position line: Axis positions (matching original format "Z:xxx.xx X:xxx.xx")
-  float xPos = esp32Motion.getPosition(0) / 1000.0;  // Convert steps to mm
-  float zPos = esp32Motion.getPosition(1) / 1000.0;  // Convert steps to mm
+  // Get real position values from motion control
+  float xPos = esp32Motion.getPosition(0);
+  float zPos = esp32Motion.getPosition(1);
   String posLine = "Z:" + String(zPos, 2) + " X:" + String(xPos, 2);
   setPositionLine(posLine);
   
   // Status line: RPM and encoder info (matching original format)
   String statusLine = "";
-  int rpm = 0; // RPM calculation not yet implemented in ESP32MotionControl
+  
+  // Get real values from motion control
+  int rpm = 0;
   int spindlePos = esp32Motion.getSpindlePosition();
   int xMPG = esp32Motion.getXMPGCount();
   int zMPG = esp32Motion.getZMPGCount();
+  float xError = esp32Motion.getPositionError(0);
+  float zError = esp32Motion.getPositionError(1);
+  uint32_t xSteps = esp32Motion.getAxisStepCount(0);
+  uint32_t zSteps = esp32Motion.getAxisStepCount(1);
   
   if (rpm > 0) {
     statusLine = String(rpm) + "rpm ";
   }
   statusLine += "Enc:" + String(spindlePos);
-  statusLine += " X:" + String(xMPG) + " Z:" + String(zMPG);
+  statusLine += " X:" + String(xMPG) + "(" + String(xError, 2) + "/" + String(xSteps) + ")";
+  statusLine += " Z:" + String(zMPG) + "(" + String(zError, 2) + "/" + String(zSteps) + ")";
+  
+  // Add test sequence status
+  if (esp32Motion.isTestSequenceActive()) {
+    statusLine += " TEST-RUNNING";
+  } else if (esp32Motion.isTestSequenceCompleted()) {
+    statusLine += " TEST-DONE";
+  } else if (esp32Motion.getEmergencyStop()) {
+    statusLine += " E-STOP";
+  } else {
+    statusLine += " READY";
+  }
   
   setStatusLine(statusLine);
 }
