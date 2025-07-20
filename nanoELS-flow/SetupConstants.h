@@ -149,6 +149,12 @@ extern const long BACKLASH_DU_X;        // Backlash compensation in deci-microns
 extern const long STEP_TIME_MS;           // Time for one manual step in milliseconds
 extern const long DELAY_BETWEEN_STEPS_MS; // Pause between manual steps in milliseconds
 
+// MPG (Manual Pulse Generator) configuration - h5.ino style
+extern const float PULSE_PER_REVOLUTION;  // MPG pulses per revolution (100 PPR encoder = 400 quadrature counts)
+extern const int MPG_PCNT_FILTER;         // Encoder filter value (1-1023 clock cycles)
+extern const int MPG_PCNT_LIM;            // PCNT limit for overflow detection
+extern const int MPG_PCNT_CLEAR;          // Reset PCNT when reaching this value
+
 // Motion control limits (converted to our system internally)
 extern const float MAX_VELOCITY_X_USER;    // Maximum X velocity in mm/s
 extern const float MAX_VELOCITY_Z_USER;    // Maximum Z velocity in mm/s

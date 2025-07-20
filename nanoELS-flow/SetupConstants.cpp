@@ -33,7 +33,7 @@ const long MOTOR_STEPS_X = 4000;         // Motor steps per revolution
 const long SPEED_START_X = MOTOR_STEPS_X;     // Initial speed, steps/second
 const long ACCELERATION_X = 25 * MOTOR_STEPS_X;  // Acceleration, steps/second²
 const long SPEED_MANUAL_MOVE_X = 8 * MOTOR_STEPS_X;  // Max manual speed, steps/second
-const bool INVERT_X = true;              // Invert direction if carriage moves wrong way
+const bool INVERT_X = false;              // Invert direction if carriage moves wrong way
 const bool INVERT_X_ENABLE = true;       // Enable pin inversion (true = active-LOW)
 const bool INVERT_X_STEP = true;         // Step pin inversion for level shifting
 const bool NEEDS_REST_X = false;         // Set false for closed-loop drivers
@@ -43,6 +43,12 @@ const long BACKLASH_DU_X = 0;           // Backlash compensation in deci-microns
 // Manual stepping configuration
 const long STEP_TIME_MS = 500;           // Time for one manual step in milliseconds
 const long DELAY_BETWEEN_STEPS_MS = 80;  // Pause between manual steps in milliseconds
+
+// MPG (Manual Pulse Generator) configuration - h5.ino style
+const float PULSE_PER_REVOLUTION = 400.0; // MPG pulses per revolution (100 PPR encoder = 400 quadrature counts)
+const int MPG_PCNT_FILTER = 10;         // Encoder filter value (1-1023 clock cycles)
+const int MPG_PCNT_LIM = 31000;         // PCNT limit for overflow detection
+const int MPG_PCNT_CLEAR = 30000;       // Reset PCNT when reaching this value
 
 // Motion control limits (converted to our system internally)
 const float MAX_VELOCITY_X_USER = 200.0;  // Maximum X velocity in mm/s (increased for manual jogging)

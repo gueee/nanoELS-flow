@@ -86,11 +86,21 @@ struct SpindleTracker {
     bool threadingActive;               // Threading mode active
 };
 
+// MPG tracking (h5.ino exact approach)
+struct MPGTracker {
+    int16_t lastCount;                  // Last PCNT hardware value
+    float fractionalPos;                // h5.ino style fractional position accumulator
+    pcnt_unit_t pcntUnit;               // Hardware PCNT unit
+    int32_t stepSize;                   // Current step size in deci-microns
+    bool active;                        // MPG manual mode active
+};
+
 class MinimalMotionControl {
 private:
     // Core data (minimal memory footprint)
     MinimalAxis axes[2];                // X=0, Z=1
     SpindleTracker spindle;
+    MPGTracker mpg[2];                  // MPG trackers for X=0, Z=1
     bool emergencyStop;
     
     // Static instance for interrupt access
@@ -103,6 +113,11 @@ private:
     void updateAxisMotion(int axis);
     void generateStepPulse(int axis);
     void updateSpeed(int axis);
+    
+    // MPG functions (h5.ino exact approach)
+    void updateMPGTracking();
+    int32_t getMPGDelta(int axis);
+    void processMPGMovement(int axis);
     
     // Hardware initialization
     void initializeEncoders();
@@ -147,6 +162,12 @@ public:
     uint32_t getMaxSpeed(int axis) { return axes[axis].maxSpeed; }
     uint32_t getCurrentSpeed(int axis) { return axes[axis].currentSpeed; }
     
+    // MPG control (Manual Pulse Generator)
+    void enableMPG(int axis, bool enable);
+    bool isMPGEnabled(int axis) { return mpg[axis].active; }
+    void setMPGStepSize(int axis, int32_t stepSizeDU);
+    int32_t getMPGStepSize(int axis) { return mpg[axis].stepSize; }
+    
     // Safety
     void setEmergencyStop(bool stop);
     bool getEmergencyStop() { return emergencyStop; }
@@ -157,11 +178,13 @@ public:
     int32_t getSpindlePosition() { return spindle.position; }
     int32_t getSpindlePositionAvg() { return spindle.positionAvg; }
     void resetSpindlePosition();
+    void zeroAxis(int axis);                // Set current position as zero origin
     
     // Status and diagnostics
     float getFollowingError(int axis);          // Following error in micrometers
     String getStatusReport();
     void printDiagnostics();
+    void printMPGDiagnostics();                 // Debug MPG system
     
     // Utility functions
     float stepsToMM(int axis, int32_t steps);

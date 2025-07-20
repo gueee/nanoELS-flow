@@ -18,6 +18,15 @@ MinimalMotionControl::MinimalMotionControl() {
     spindle.threadStarts = 1;
     spindle.threadingActive = false;
     
+    // Initialize MPG trackers (h5.ino style)
+    for (int i = 0; i < 2; i++) {
+        mpg[i].lastCount = 0;
+        mpg[i].fractionalPos = 0.0;     // h5.ino style fractional position
+        mpg[i].pcntUnit = (i == AXIS_X) ? PCNT_UNIT_2 : PCNT_UNIT_1;
+        mpg[i].stepSize = 10000;  // Default 1mm step size
+        mpg[i].active = false;
+    }
+    
     // Initialize axes with h5.ino-compatible defaults
     for (int i = 0; i < 2; i++) {
         MinimalAxis& axis = axes[i];
@@ -91,6 +100,28 @@ void MinimalMotionControl::initializeEncoders() {
     pcnt_counter_pause(PCNT_UNIT_0);
     pcnt_counter_clear(PCNT_UNIT_0);
     pcnt_counter_resume(PCNT_UNIT_0);
+    
+    // Configure PCNT for MPG encoders (h5.ino style)
+    for (int i = 0; i < 2; i++) {
+        pcnt_config_t mpg_config;
+        mpg_config.pulse_gpio_num = (i == AXIS_X) ? X_PULSE_A : Z_PULSE_A;
+        mpg_config.ctrl_gpio_num = (i == AXIS_X) ? X_PULSE_B : Z_PULSE_B;
+        mpg_config.channel = PCNT_CHANNEL_0;
+        mpg_config.unit = mpg[i].pcntUnit;
+        mpg_config.pos_mode = PCNT_COUNT_INC;
+        mpg_config.neg_mode = PCNT_COUNT_DEC;
+        mpg_config.lctrl_mode = PCNT_MODE_REVERSE;
+        mpg_config.hctrl_mode = PCNT_MODE_KEEP;
+        mpg_config.counter_h_lim = MPG_PCNT_LIM;
+        mpg_config.counter_l_lim = -MPG_PCNT_LIM;
+        
+        pcnt_unit_config(&mpg_config);
+        pcnt_set_filter_value(mpg[i].pcntUnit, MPG_PCNT_FILTER);
+        pcnt_filter_enable(mpg[i].pcntUnit);
+        pcnt_counter_pause(mpg[i].pcntUnit);
+        pcnt_counter_clear(mpg[i].pcntUnit);
+        pcnt_counter_resume(mpg[i].pcntUnit);
+    }
 }
 
 void MinimalMotionControl::initializeGPIO() {
@@ -176,11 +207,17 @@ void MinimalMotionControl::update() {
     // Update spindle tracking with backlash compensation
     updateSpindleTracking();
     
+    // Update MPG tracking (h5.ino style continuous monitoring)
+    updateMPGTracking();
+    
     // Update each axis
     for (int axis = 0; axis < 2; axis++) {
         if (axes[axis].enabled) {
-            // Calculate target position from spindle (if threading)
-            if (spindle.threadingActive && spindle.threadPitch != 0) {
+            // Process MPG movement (takes priority over threading)
+            processMPGMovement(axis);
+            
+            // Calculate target position from spindle (if threading and MPG not active)
+            if (spindle.threadingActive && spindle.threadPitch != 0 && !mpg[axis].active) {
                 int32_t newTarget = positionFromSpindle(axis, spindle.positionAvg);
                 axes[axis].targetPosition = newTarget;
             }
@@ -360,6 +397,15 @@ void MinimalMotionControl::resetSpindlePosition() {
     pcnt_counter_clear(PCNT_UNIT_0);
 }
 
+void MinimalMotionControl::zeroAxis(int axis) {
+    if (axis >= 0 && axis < 2) {
+        // Set current position as new zero origin (like h5.ino markAxis0)
+        axes[axis].position = 0;
+        axes[axis].targetPosition = 0;
+        // No physical movement - just resets coordinate system
+    }
+}
+
 // Status and diagnostics
 float MinimalMotionControl::getFollowingError(int axis) {
     if (!spindle.threadingActive || axis < 0 || axis >= 2) {
@@ -403,6 +449,24 @@ void MinimalMotionControl::printDiagnostics() {
     }
 }
 
+void MinimalMotionControl::printMPGDiagnostics() {
+    Serial.println("=== MPG Diagnostics ===");
+    
+    for (int i = 0; i < 2; i++) {
+        char axisName = (i == AXIS_X) ? 'X' : 'Z';
+        int16_t count;
+        esp_err_t err = pcnt_get_counter_value(mpg[i].pcntUnit, &count);
+        
+        Serial.printf("%c-axis MPG (PCNT_UNIT_%d):\n", axisName, mpg[i].pcntUnit);
+        Serial.printf("  Active: %s\n", mpg[i].active ? "YES" : "NO");
+        Serial.printf("  Step Size: %d du (%.3f mm)\n", mpg[i].stepSize, mpg[i].stepSize / 10000.0);
+        Serial.printf("  PCNT Read: %s (count=%d)\n", err == ESP_OK ? "OK" : "ERROR", count);
+        Serial.printf("  Last Count: %d\n", mpg[i].lastCount);
+        Serial.printf("  Fractional Pos: %.3f\n", mpg[i].fractionalPos);
+        Serial.println();
+    }
+}
+
 // Utility functions
 float MinimalMotionControl::stepsToMM(int axis, int32_t steps) {
     if (axis < 0 || axis >= 2) return 0.0;
@@ -416,10 +480,108 @@ int32_t MinimalMotionControl::mmToSteps(int axis, float mm) {
     return (int32_t)(mm * 10000.0 * a.motorSteps / a.screwPitch);  // Convert to deci-microns
 }
 
+// ======================================================================
+// MPG (Manual Pulse Generator) Implementation - h5.ino style
+// ======================================================================
+
+// Read MPG encoder delta (h5.ino algorithm)
+int32_t MinimalMotionControl::getMPGDelta(int axis) {
+    if (axis < 0 || axis >= 2) return 0;
+    
+    int16_t count;
+    esp_err_t err = pcnt_get_counter_value(mpg[axis].pcntUnit, &count);
+    if (err != ESP_OK) {
+        Serial.printf("MPG[%d] PCNT read error: %d\n", axis, err);
+        return 0;
+    }
+    
+    int32_t delta = count - mpg[axis].lastCount;
+    
+    if (delta == 0) return 0;
+    
+    // Debug output for non-zero deltas
+    Serial.printf("MPG[%d] delta=%d (count=%d, last=%d)\n", axis, delta, count, mpg[axis].lastCount);
+    
+    // Handle PCNT overflow (h5.ino style)
+    if (count >= MPG_PCNT_CLEAR || count <= -MPG_PCNT_CLEAR) {
+        pcnt_counter_clear(mpg[axis].pcntUnit);
+        mpg[axis].lastCount = 0;
+    } else {
+        mpg[axis].lastCount = count;
+    }
+    
+    return delta;
+}
+
+// h5.ino: calculateStepScale() not needed - uses direct formula in processing
+
+// Update MPG tracking for all axes (h5.ino exact algorithm)
+void MinimalMotionControl::updateMPGTracking() {
+    for (int axis = 0; axis < 2; axis++) {
+        if (!mpg[axis].active) continue;
+        
+        int32_t pulseDelta = getMPGDelta(axis);
+        if (pulseDelta == 0) continue;
+        
+        MinimalAxis& a = axes[axis];
+        
+        // h5.ino exact formula: pulseDelta / PULSE_PER_REVOLUTION * motorSteps + fractionalPos
+        float fractionalDelta = (float)pulseDelta / PULSE_PER_REVOLUTION * a.motorSteps + mpg[axis].fractionalPos;
+        int32_t deltaSteps = round(fractionalDelta);
+        
+        // h5.ino fractional accumulation - don't lose fractional steps
+        mpg[axis].fractionalPos = fractionalDelta - deltaSteps;
+        
+        // Apply movement directly to target position (h5.ino style)
+        if (deltaSteps != 0) {
+            axes[axis].targetPosition += deltaSteps;
+        }
+    }
+}
+
+// Process MPG movement for one axis (h5.ino style - soft limit checking)
+void MinimalMotionControl::processMPGMovement(int axis) {
+    if (axis < 0 || axis >= 2 || !mpg[axis].active) return;
+    
+    // h5.ino approach: movement already applied in updateMPGTracking()
+    // This function now just enforces soft limits
+    MinimalAxis& a = axes[axis];
+    
+    // Respect soft limits (h5.ino style limit enforcement)
+    if (a.targetPosition > a.leftStop) {
+        a.targetPosition = a.leftStop;
+    } else if (a.targetPosition < a.rightStop) {
+        a.targetPosition = a.rightStop;
+    }
+}
+
+// MPG control interface methods
+void MinimalMotionControl::enableMPG(int axis, bool enable) {
+    if (axis >= 0 && axis < 2) {
+        mpg[axis].active = enable;
+        Serial.printf("MPG[%d] %s (stepSize=%d du)\n", axis, enable ? "ENABLED" : "DISABLED", mpg[axis].stepSize);
+        
+        if (enable) {
+            // Reset tracking when enabling (h5.ino style)
+            mpg[axis].fractionalPos = 0.0;
+            pcnt_counter_clear(mpg[axis].pcntUnit);
+            mpg[axis].lastCount = 0;
+            Serial.printf("MPG[%d] tracking reset\n", axis);
+        }
+    }
+}
+
+void MinimalMotionControl::setMPGStepSize(int axis, int32_t stepSizeDU) {
+    if (axis >= 0 && axis < 2) {
+        mpg[axis].stepSize = stepSizeDU;
+    }
+}
+
 void MinimalMotionControl::shutdown() {
     setEmergencyStop(true);
     
     for (int i = 0; i < 2; i++) {
         disableAxis(i);
+        enableMPG(i, false);  // Disable MPG tracking
     }
 }
