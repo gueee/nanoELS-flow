@@ -173,8 +173,8 @@ void NextionDisplay::showMotionStatus() {
   
   // Position line: Axis positions (matching original format "Z:xxx.xx X:xxx.xx")
   // Get real position values from motion control
-  float xPos = esp32Motion.getPosition(0);
-  float zPos = esp32Motion.getPosition(1);
+  float xPos = motionControl.stepsToMM(AXIS_X, motionControl.getPosition(AXIS_X));
+  float zPos = motionControl.stepsToMM(AXIS_Z, motionControl.getPosition(AXIS_Z));
   String posLine = "Z:" + String(zPos, 2) + " X:" + String(xPos, 2);
   setPositionLine(posLine);
   
@@ -183,27 +183,23 @@ void NextionDisplay::showMotionStatus() {
   
   // Get real values from motion control
   int rpm = 0;
-  int spindlePos = esp32Motion.getSpindlePosition();
-  int xMPG = esp32Motion.getXMPGCount();
-  int zMPG = esp32Motion.getZMPGCount();
-  float xError = esp32Motion.getPositionError(0);
-  float zError = esp32Motion.getPositionError(1);
-  uint32_t xSteps = esp32Motion.getAxisStepCount(0);
-  uint32_t zSteps = esp32Motion.getAxisStepCount(1);
+  int spindlePos = motionControl.getSpindlePosition();
+  float xError = motionControl.getFollowingError(AXIS_X);
+  float zError = motionControl.getFollowingError(AXIS_Z);
+  int32_t xSteps = motionControl.getPosition(AXIS_X);
+  int32_t zSteps = motionControl.getPosition(AXIS_Z);
   
   if (rpm > 0) {
     statusLine = String(rpm) + "rpm ";
   }
   statusLine += "ENC:" + String(spindlePos);
-  statusLine += " X:" + String(xMPG) + " Z:" + String(zMPG);
+  statusLine += " X:" + String(xSteps) + " Z:" + String(zSteps);
   
-  // Add test sequence status
-  if (esp32Motion.isTestSequenceActive()) {
-    statusLine += " TEST-RUNNING";
-  } else if (esp32Motion.isTestSequenceCompleted()) {
-    statusLine += " TEST-DONE";
-  } else if (esp32Motion.getEmergencyStop()) {
+  // Add motion status
+  if (motionControl.getEmergencyStop()) {
     statusLine += " E-STOP";
+  } else if (motionControl.isMoving(AXIS_X) || motionControl.isMoving(AXIS_Z)) {
+    statusLine += " MOVING";
   } else {
     statusLine += " READY";
   }

@@ -62,10 +62,7 @@ MinimalMotionControl::~MinimalMotionControl() {
 }
 
 bool MinimalMotionControl::initialize() {
-    if (!initializeEncoders()) {
-        return false;
-    }
-    
+    initializeEncoders();
     initializeGPIO();
     
     // Reset spindle tracking
@@ -76,18 +73,17 @@ bool MinimalMotionControl::initialize() {
 
 void MinimalMotionControl::initializeEncoders() {
     // Configure PCNT for spindle encoder (h5.ino style)
-    pcnt_config_t pcnt_config = {
-        .pulse_gpio_num = ENC_A,
-        .ctrl_gpio_num = ENC_B,
-        .channel = PCNT_CHANNEL_0,
-        .unit = PCNT_UNIT_0,
-        .pos_mode = PCNT_COUNT_INC,
-        .neg_mode = PCNT_COUNT_DEC,
-        .lctrl_mode = PCNT_MODE_REVERSE,
-        .hctrl_mode = PCNT_MODE_KEEP,
-        .counter_h_lim = 30000,     // h5.ino PCNT_LIM
-        .counter_l_lim = -30000,
-    };
+    pcnt_config_t pcnt_config;
+    pcnt_config.pulse_gpio_num = ENC_A;
+    pcnt_config.ctrl_gpio_num = ENC_B;
+    pcnt_config.channel = PCNT_CHANNEL_0;
+    pcnt_config.unit = PCNT_UNIT_0;
+    pcnt_config.pos_mode = PCNT_COUNT_INC;
+    pcnt_config.neg_mode = PCNT_COUNT_DEC;
+    pcnt_config.lctrl_mode = PCNT_MODE_REVERSE;
+    pcnt_config.hctrl_mode = PCNT_MODE_KEEP;
+    pcnt_config.counter_h_lim = 30000;     // h5.ino PCNT_LIM
+    pcnt_config.counter_l_lim = -30000;
     
     pcnt_unit_config(&pcnt_config);
     pcnt_set_filter_value(PCNT_UNIT_0, ENCODER_FILTER);

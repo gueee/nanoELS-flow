@@ -8,7 +8,7 @@
 #include <LittleFS.h>
 #include <FS.h>
 #include "indexhtml.h"
-#include "ESP32MotionControl.h"
+#include "MinimalMotionControl.h"
 #include "NextionDisplay.h"
 
 class WebInterface {

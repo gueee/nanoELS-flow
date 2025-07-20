@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include "SetupConstants.h"
-#include "ESP32MotionControl.h"
+#include "MinimalMotionControl.h"
 
 // Nextion display object IDs (from original h5.ino)
 #define NEXTION_T0  0  // Top line status display

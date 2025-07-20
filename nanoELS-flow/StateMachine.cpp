@@ -1,5 +1,5 @@
 #include "StateMachine.h"
-#include "ESP32MotionControl.h"
+#include "MinimalMotionControl.h"
 #include "NextionDisplay.h"
 #include "WebInterface.h"
 #include "SetupConstants.h"
@@ -254,7 +254,7 @@ void SystemStateMachine::handleKeyboardScan() {
 }
 
 void SystemStateMachine::handleMotionUpdate() {
-    esp32Motion.update();
+    motionControl.update();
 }
 
 void SystemStateMachine::handleDisplayUpdate() {
@@ -298,8 +298,7 @@ void SystemStateMachine::handleIdle() {
 
 void SystemStateMachine::triggerEmergency() {
     Serial.println("*** EMERGENCY STOP TRIGGERED ***");
-    esp32Motion.setEmergencyStop(true);
-    esp32Motion.stopTestSequence();
+    motionControl.setEmergencyStop(true);
     nextionDisplay.showEmergencyStop();
     
     // Force immediate transition to emergency check

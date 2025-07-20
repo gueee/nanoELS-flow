@@ -349,7 +349,7 @@ void WebInterface::webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, 
         webSocket->sendTXT(num, welcome);
         
         // Send current status
-        String status = esp32Motion.getStatusReport();
+        String status = motionControl.getStatusReport();
         webSocket->sendTXT(num, status);
       }
       break;
@@ -383,7 +383,7 @@ void WebInterface::processWebSocketCommand(String command) {
   
   if (command == "?") {
     // Status request
-    String status = esp32Motion.getStatusReport();
+    String status = motionControl.getStatusReport();
     String statusMsg = "Status: " + status;
     webSocket->broadcastTXT(statusMsg);
     
@@ -397,13 +397,13 @@ void WebInterface::processWebSocketCommand(String command) {
     
   } else if (command == "!") {
     // Emergency stop
-    esp32Motion.setEmergencyStop(true);
+    motionControl.setEmergencyStop(true);
     String stopMsg = "Emergency stop activated";
     webSocket->broadcastTXT(stopMsg);
     
   } else if (command == "~") {
     // Release emergency stop
-    esp32Motion.setEmergencyStop(false);
+    motionControl.setEmergencyStop(false);
     String releaseMsg = "Emergency stop released";
     webSocket->broadcastTXT(releaseMsg);
     
@@ -428,7 +428,7 @@ void WebInterface::processWebSocketCommand(String command) {
     int steps = command.substring(1).toInt();
     uint8_t axisNum = (axis == 'X') ? 0 : 1;
     
-    esp32Motion.moveRelative(axisNum, steps);
+    motionControl.moveRelative(axisNum, steps);
     String moveMsg = "Moving " + String(axis) + " axis " + String(steps) + " steps";
     webSocket->broadcastTXT(moveMsg);
     
@@ -512,7 +512,7 @@ String WebInterface::getStatusInfo() {
   info += "LittleFS.totalBytes=" + String(LittleFS.totalBytes()) + "\n";
   info += "LittleFS.usedBytes=" + String(LittleFS.usedBytes()) + "\n";
   info += "LittleFS.freeSpace=" + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + "\n";
-  info += "ESP32MotionControl.status=" + esp32Motion.getStatusReport() + "\n";
+  info += "MinimalMotionControl.status=" + motionControl.getStatusReport() + "\n";
   info += "LastCommand=" + lastCommand + "\n";
   
   return info;
@@ -570,9 +570,9 @@ void WebInterface::broadcastMessage(const String& message) {
 
 void WebInterface::sendMotionStatus() {
   if (webSocket && webServerRunning) {
-    String status = "Motion: X=" + String(esp32Motion.getPosition(0)) + 
-                   " Z=" + String(esp32Motion.getPosition(1)) + 
-                   " Spindle=" + String(esp32Motion.getSpindlePosition());
+    String status = "Motion: X=" + String(motionControl.stepsToMM(AXIS_X, motionControl.getPosition(AXIS_X)), 2) + 
+                   " Z=" + String(motionControl.stepsToMM(AXIS_Z, motionControl.getPosition(AXIS_Z)), 2) + 
+                   " Spindle=" + String(motionControl.getSpindlePosition());
     String statusCopy = status;
     webSocket->broadcastTXT(statusCopy);
   }

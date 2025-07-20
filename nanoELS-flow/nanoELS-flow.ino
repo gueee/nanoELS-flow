@@ -76,6 +76,9 @@ float manualStepSize = 1.0;  // Current step size for manual movements (mm)
 // Shared variable for emergency stop coordination
 volatile bool emergencyKeyDetected = false;
 
+// Display debug mode flag (for NextionDisplay)
+bool t3DebugMode = false;
+
 // Simple status display mode
 bool showDiagnostics = false;
 
