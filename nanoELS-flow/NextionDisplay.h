@@ -2,7 +2,7 @@
 #define NEXTIONDISPLAY_H
 
 #include <Arduino.h>
-#include "MyHardware.h"
+#include "SetupConstants.h"
 #include "ESP32MotionControl.h"
 
 // Nextion display object IDs (from original h5.ino)

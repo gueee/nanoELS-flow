@@ -1,0 +1,145 @@
+stateDiagram-v2
+    [*] --> POWER_ON
+    
+    %% Initialization States
+    POWER_ON --> INIT_HARDWARE : System Boot
+    INIT_HARDWARE --> INIT_PCNT : Initialize PCNT_0 (Spindle)
+    INIT_PCNT --> INIT_MPG : Initialize PCNT_1,2 (MPGs)
+    INIT_MPG --> INIT_DISPLAY : Initialize Nextion Display
+    INIT_DISPLAY --> INIT_KEYBOARD : Initialize PS2 Keyboard
+    INIT_KEYBOARD --> INIT_WIFI : Hardware Ready
+    
+    %% Network Setup
+    INIT_WIFI --> WIFI_SCAN : Scan Networks
+    WIFI_SCAN --> WIFI_CONNECT : Known Network Found
+    WIFI_SCAN --> AP_MODE : No Known Networks
+    WIFI_CONNECT --> MANUAL_MODE : Connected
+    WIFI_CONNECT --> AP_MODE : Connection Failed
+    AP_MODE --> MANUAL_MODE : AP Started
+    
+    %% Main Operating State
+    MANUAL_MODE --> MANUAL_MODE : Arrow Keys/MPG Input
+    
+    %% Operation Mode Selection (F1-F10)
+    MANUAL_MODE --> TURNING_SETUP : F1 - Turning (Shoulder)
+    MANUAL_MODE --> FACING_SETUP : F2 - Facing
+    MANUAL_MODE --> THREADING_SETUP : F3 - Threading
+    MANUAL_MODE --> TAPER_SETUP : F4 - Taper
+    MANUAL_MODE --> CIRCLE_SETUP : F5 - Circle/Ellipse
+    MANUAL_MODE --> GEARBOX_MODE : F6 - Gearbox Mode
+    MANUAL_MODE --> GCODE_SETUP : F7 - G-Code Mode
+    MANUAL_MODE --> RESERVED_F8 : F8 - Reserved
+    MANUAL_MODE --> RESERVED_F9 : F9 - Reserved
+    MANUAL_MODE --> RESERVED_F10 : F10 - Reserved
+    
+    %% Turning Setup and Execution
+    TURNING_SETUP --> TURNING_PARAMS : Set Depth, Length, Feed
+    TURNING_PARAMS --> TURNING_EXECUTE : Parameters Valid
+    TURNING_PARAMS --> TURNING_SETUP : Invalid Parameters
+    TURNING_EXECUTE --> TURNING_ACTIVE : Start Operation
+    TURNING_ACTIVE --> TURNING_COMPLETE : Operation Done
+    TURNING_ACTIVE --> MANUAL_MODE : Emergency Stop/Cancel
+    TURNING_COMPLETE --> MANUAL_MODE : Return to Manual
+    
+    %% Facing Setup and Execution
+    FACING_SETUP --> FACING_PARAMS : Set Diameter, Depth, Feed
+    FACING_PARAMS --> FACING_EXECUTE : Parameters Valid
+    FACING_PARAMS --> FACING_SETUP : Invalid Parameters
+    FACING_EXECUTE --> FACING_ACTIVE : Start Operation
+    FACING_ACTIVE --> FACING_COMPLETE : Operation Done
+    FACING_ACTIVE --> MANUAL_MODE : Emergency Stop/Cancel
+    FACING_COMPLETE --> MANUAL_MODE : Return to Manual
+    
+    %% Threading Setup and Execution
+    THREADING_SETUP --> THREADING_TYPE : Select Type
+    THREADING_TYPE --> THREADING_PARAMS : LH/RH, Int/Ext, Single/Multi
+    THREADING_PARAMS --> THREADING_PITCH : Set Pitch, Depth, Length
+    THREADING_PITCH --> THREADING_EXECUTE : Parameters Valid
+    THREADING_PITCH --> THREADING_PARAMS : Invalid Parameters
+    THREADING_EXECUTE --> THREADING_ACTIVE : Start Operation
+    THREADING_ACTIVE --> THREADING_COMPLETE : Operation Done
+    THREADING_ACTIVE --> MANUAL_MODE : Emergency Stop/Cancel
+    THREADING_COMPLETE --> MANUAL_MODE : Return to Manual
+    
+    %% Taper Setup and Execution
+    TAPER_SETUP --> TAPER_TYPE : Select Int/Ext, Direction
+    TAPER_TYPE --> TAPER_METHOD : Choose Input Method
+    TAPER_METHOD --> TAPER_PARAMS : Angle/Ratio/Coordinates
+    TAPER_PARAMS --> TAPER_EXECUTE : Parameters Valid
+    TAPER_PARAMS --> TAPER_METHOD : Invalid Parameters
+    TAPER_EXECUTE --> TAPER_ACTIVE : Start Operation
+    TAPER_ACTIVE --> TAPER_COMPLETE : Operation Done
+    TAPER_ACTIVE --> MANUAL_MODE : Emergency Stop/Cancel
+    TAPER_COMPLETE --> MANUAL_MODE : Return to Manual
+    
+    %% Circle/Ellipse Setup and Execution
+    CIRCLE_SETUP --> CIRCLE_TYPE : Circle or Ellipse
+    CIRCLE_TYPE --> CIRCLE_PARAMS : Set Radius/Axes, Depth
+    CIRCLE_PARAMS --> CIRCLE_EXECUTE : Parameters Valid
+    CIRCLE_PARAMS --> CIRCLE_SETUP : Invalid Parameters
+    CIRCLE_EXECUTE --> CIRCLE_ACTIVE : Start Operation
+    CIRCLE_ACTIVE --> CIRCLE_COMPLETE : Operation Done
+    CIRCLE_ACTIVE --> MANUAL_MODE : Emergency Stop/Cancel
+    CIRCLE_COMPLETE --> MANUAL_MODE : Return to Manual
+    
+    %% Gearbox Mode
+    GEARBOX_MODE --> GEARBOX_SETUP : Configure Ratios
+    GEARBOX_SETUP --> GEARBOX_ACTIVE : Ratios Set
+    GEARBOX_ACTIVE --> MANUAL_MODE : Exit Gearbox Mode
+    GEARBOX_ACTIVE --> GEARBOX_ACTIVE : Continuous Operation
+    
+    %% G-Code Mode
+    GCODE_SETUP --> GCODE_SOURCE : Select Source
+    GCODE_SOURCE --> GCODE_LOAD : Web Interface/File
+    GCODE_LOAD --> GCODE_PARSE : File Selected
+    GCODE_PARSE --> GCODE_EXECUTE : Parse OK
+    GCODE_PARSE --> GCODE_LOAD : Parse Error
+    GCODE_EXECUTE --> GCODE_ACTIVE : Start Program
+    GCODE_ACTIVE --> GCODE_COMPLETE : Program Done
+    GCODE_ACTIVE --> GCODE_PAUSED : Pause Command
+    GCODE_ACTIVE --> MANUAL_MODE : Emergency Stop/Cancel
+    GCODE_PAUSED --> GCODE_ACTIVE : Resume
+    GCODE_PAUSED --> MANUAL_MODE : Cancel
+    GCODE_COMPLETE --> MANUAL_MODE : Return to Manual
+    
+    %% Reserved Functions
+    RESERVED_F8 --> MANUAL_MODE : Not Implemented
+    RESERVED_F9 --> MANUAL_MODE : Not Implemented
+    RESERVED_F10 --> MANUAL_MODE : Not Implemented
+    
+    %% Emergency States (accessible from any active operation)
+    note right of MANUAL_MODE
+        Emergency Stop available
+        from any active operation
+        
+        Manual Mode Features:
+        - Arrow key axis control
+        - MPG axis control
+        - Real-time spindle position
+        - Display current status
+    end note
+    
+    note right of INIT_HARDWARE
+        Hardware Initialization:
+        - PCNT_0: Spindle encoder
+        - PCNT_1: X-axis MPG
+        - PCNT_2: Z-axis MPG
+        - Nextion 5" display
+        - PS2 keyboard interface
+    end note
+    
+    note right of THREADING_TYPE
+        Threading Options:
+        - Left/Right hand
+        - Internal/External
+        - Single/Multi start
+        - Cylindrical/Tapered
+    end note
+    
+    note right of TAPER_METHOD
+        Taper Input Methods:
+        - Angle and length
+        - Taper ratio
+        - Start/end coordinates
+        - Incremental method
+    end note

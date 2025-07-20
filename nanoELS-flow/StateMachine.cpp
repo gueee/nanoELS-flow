@@ -2,7 +2,7 @@
 #include "ESP32MotionControl.h"
 #include "NextionDisplay.h"
 #include "WebInterface.h"
-#include "MyHardware.h"
+#include "SetupConstants.h"
 #include <PS2KeyAdvanced.h>
 
 // Global instances
