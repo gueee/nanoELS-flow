@@ -21,8 +21,8 @@
 
 #define B_LEFT 68 // Left arrow - controls Z axis movement to the left
 #define B_RIGHT 75 // Right arrow - controls Z axis movement to the right
-#define B_UP 85 // Up arrow - controls X axis movement forwards
-#define B_DOWN 72 // Down arrow - controls X axis movement backwards
+#define B_UP 85 // Up arrow - X axis towards centerline (away from operator)
+#define B_DOWN 72 // Down arrow - X axis away from centerline (towards operator)
 #define B_MINUS 73 // Numpad minus - recrements the pitch or number of passes
 #define B_PLUS 87 // Numpad plus - increments the pitch or number of passes
 #define B_ON 50 // Enter - starts operation or mode

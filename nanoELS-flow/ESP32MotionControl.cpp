@@ -85,9 +85,10 @@ void ESP32MotionControl::initializeGPIO() {
     // Calculate pulses per mm from setup constants: MOTOR_STEPS_X steps per SCREW_X_DU deci-microns
     float stepsPerMM_X = (float)MOTOR_STEPS_X / ((float)SCREW_X_DU / 10000.0);
     axes[0].pulsesPerMM = FLOAT_TO_FIXED(stepsPerMM_X);
+    Serial.printf("*** X-AXIS SETUP: MOTOR_STEPS_X=%d, SCREW_X_DU=%d, stepsPerMM=%.1f ***\n", 
+                  (int)MOTOR_STEPS_X, (int)SCREW_X_DU, stepsPerMM_X);
     axes[0].maxVelocity = FLOAT_TO_FIXED(MAX_VELOCITY_X_USER * stepsPerMM_X);  // Convert mm/s to steps/s
     axes[0].maxAcceleration = FLOAT_TO_FIXED(MAX_ACCELERATION_X_USER * stepsPerMM_X);  // Convert mm/s² to steps/s²
-    axes[0].invertDirection = INVERT_X;
     axes[0].invertEnable = INVERT_X_ENABLE;
     axes[0].invertStep = INVERT_X_STEP;
     
@@ -98,9 +99,10 @@ void ESP32MotionControl::initializeGPIO() {
     // Calculate pulses per mm from setup constants: MOTOR_STEPS_Z steps per SCREW_Z_DU deci-microns
     float stepsPerMM_Z = (float)MOTOR_STEPS_Z / ((float)SCREW_Z_DU / 10000.0);
     axes[1].pulsesPerMM = FLOAT_TO_FIXED(stepsPerMM_Z);
+    Serial.printf("*** Z-AXIS SETUP: MOTOR_STEPS_Z=%d, SCREW_Z_DU=%d, stepsPerMM=%.1f ***\n", 
+                  (int)MOTOR_STEPS_Z, (int)SCREW_Z_DU, stepsPerMM_Z);
     axes[1].maxVelocity = FLOAT_TO_FIXED(MAX_VELOCITY_Z_USER * stepsPerMM_Z);  // Convert mm/s to steps/s
     axes[1].maxAcceleration = FLOAT_TO_FIXED(MAX_ACCELERATION_Z_USER * stepsPerMM_Z);  // Convert mm/s² to steps/s²
-    axes[1].invertDirection = INVERT_Z;
     axes[1].invertEnable = INVERT_Z_ENABLE;
     axes[1].invertStep = INVERT_Z_STEP;
     
@@ -153,11 +155,11 @@ void ESP32MotionControl::initializeGPIO() {
     
     Serial.println("✓ GPIO initialized with setup section constants (fixed-point)");
     Serial.printf("  X-axis: Dir=%s, Enable=%s, Step=%s\n", 
-                 axes[0].invertDirection ? "INV" : "NORM",
+                 INVERT_X ? "INV" : "NORM",
                  axes[0].invertEnable ? "INV" : "NORM",
                  axes[0].invertStep ? "INV" : "NORM");
     Serial.printf("  Z-axis: Dir=%s, Enable=%s, Step=%s\n", 
-                 axes[1].invertDirection ? "INV" : "NORM",
+                 INVERT_Z ? "INV" : "NORM",
                  axes[1].invertEnable ? "INV" : "NORM",
                  axes[1].invertStep ? "INV" : "NORM");
     Serial.println("AXIS CONFIGURATION FROM SETUP CONSTANTS:");
@@ -281,7 +283,7 @@ void ESP32MotionControl::generateStepPulse(int axis) {
         axes[axis].stepPending = false;
     } else if (axes[axis].stepPending || axes[axis].stepsToGo > 0) {
         // Generate multiple steps per ISR cycle for high speeds
-        int32_t stepsThisCycle = min(axes[axis].stepsToGo, (int32_t)50);  // Max 50 steps per cycle
+        int32_t stepsThisCycle = min((int32_t)axes[axis].stepsToGo, (int32_t)50);  // Max 50 steps per cycle
         if (stepsThisCycle < 1) stepsThisCycle = 1;
         
         // Step pulse HIGH phase (considering inversion)
@@ -299,7 +301,7 @@ void ESP32MotionControl::generateStepPulse(int axis) {
         
         // Update position based on step direction for all steps
         bool direction = digitalRead(axes[axis].dirPin);
-        if (axes[axis].invertDirection) direction = !direction;
+        // Direction logic now handled only by hardware constants in updateStepGeneration()
         
         if (direction) {
             axes[axis].currentPosition += stepsThisCycle;  // +N steps
@@ -456,9 +458,12 @@ void ESP32MotionControl::calculateMotionProfile(int axis, int32_t targetPos) {
     profile.moveActive = true;
     profile.moveCompleted = false;
     
-    // Set direction with hardware-specific inversion
+    // Set direction using only hardware constants (INVERT_X/INVERT_Z)
     bool direction = (targetPos > axes[axis].currentPosition);
-    if (axes[axis].invertDirection) direction = !direction;
+    // Apply hardware-specific direction inversion
+    if ((axis == 0 && INVERT_X) || (axis == 1 && INVERT_Z)) {
+        direction = !direction;
+    }
     digitalWrite(axes[axis].dirPin, direction ? HIGH : LOW);
     
     Serial.printf("Profile calculated: Axis %d, Distance=%d, AccelDist=%d, MaxVel=%d, MoveActive=%s\n", 
@@ -574,16 +579,13 @@ void ESP32MotionControl::updateStepGeneration(int axis) {
         return;
     }
     
-    // Set direction based on error direction
+    // Set direction based on error direction using only hardware constants
     bool direction = error > 0;
-    if (axes[axis].invertDirection) direction = !direction;
-    
-    // Apply hardware-specific direction inversion
-    bool dirState = direction;
+    // Apply hardware-specific direction inversion (single source of truth)
     if ((axis == 0 && INVERT_X) || (axis == 1 && INVERT_Z)) {
-        dirState = !dirState;
+        direction = !direction;
     }
-    digitalWrite(axes[axis].dirPin, dirState ? HIGH : LOW);
+    digitalWrite(axes[axis].dirPin, direction ? HIGH : LOW);
     
     // Calculate step rate based on position error (simple proportional control)
     float errorMM = FIXED_TO_FLOAT(absError);
@@ -654,7 +656,11 @@ void ESP32MotionControl::updateTestSequence() {
 // Fixed-point math helper methods
 int32_t ESP32MotionControl::mmToSteps(int axis, float mm) {
     if (axis < 0 || axis >= 2) return 0;
-    return (int32_t)(mm * FIXED_TO_FLOAT(axes[axis].pulsesPerMM));
+    float pulsesPerMM = FIXED_TO_FLOAT(axes[axis].pulsesPerMM);
+    int32_t steps = (int32_t)(mm * pulsesPerMM);
+    Serial.printf("*** mmToSteps: axis=%d, mm=%.3f, pulsesPerMM=%.1f, steps=%d ***\n", 
+                  axis, mm, pulsesPerMM, steps);
+    return steps;
 }
 
 float ESP32MotionControl::stepsToMM(int axis, int32_t steps) {

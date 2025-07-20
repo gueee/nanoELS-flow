@@ -40,8 +40,8 @@
 // Keyboard key definitions (personal development configuration)
 #define B_LEFT 68      // Left arrow - Z axis left movement
 #define B_RIGHT 75     // Right arrow - Z axis right movement
-#define B_UP 85        // Up arrow - X axis forward movement
-#define B_DOWN 72      // Down arrow - X axis backward movement
+#define B_UP 85        // Up arrow - X axis towards centerline (away from operator)
+#define B_DOWN 72      // Down arrow - X axis away from centerline (towards operator)
 #define B_MINUS 73     // Numpad minus - decrement pitch/passes
 #define B_PLUS 87      // Numpad plus - increment pitch/passes
 #define B_ON 50        // Enter - start operation/mode

@@ -112,7 +112,6 @@ struct AxisConfig {
     // Status flags
     bool enabled;
     volatile bool moving;
-    bool invertDirection;     // Direction pin inversion
     bool invertEnable;        // Enable pin inversion
     bool invertStep;          // Step pin inversion
     

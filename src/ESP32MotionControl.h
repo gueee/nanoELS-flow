@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "MyHardware.h"
+#include "SetupConstants.h"
 
 /**
  * ESP32MotionControl - PID Position Controller for ClearPath Servos
@@ -17,20 +18,8 @@
 
 // Hardware configuration constants (based on h5.ino pattern)
 // These should match your hardware setup
-const bool INVERT_X = true;           // X-axis direction inversion
-const bool INVERT_Z = false;          // Z-axis direction inversion
-const bool INVERT_X_ENABLE = true;    // X-axis enable pin inversion (active-LOW)
-const bool INVERT_Z_ENABLE = true;    // Z-axis enable pin inversion (active-LOW)
-const bool INVERT_X_STEP = true;      // X-axis step pin inversion (level shifting)
-const bool INVERT_Z_STEP = true;      // Z-axis step pin inversion (level shifting)
 
-// Motion limits (conservative for testing)
-const float MAX_TRAVEL_MM_X = 50.0;   // X-axis travel limit
-const float MAX_TRAVEL_MM_Z = 50.0;   // Z-axis travel limit
-const float MAX_VELOCITY_X = 50.0;    // X-axis max velocity (mm/s)
-const float MAX_VELOCITY_Z = 50.0;    // Z-axis max velocity (mm/s)
-const float MAX_ACCELERATION_X = 500.0; // X-axis max acceleration (mm/s²)
-const float MAX_ACCELERATION_Z = 500.0; // Z-axis max acceleration (mm/s²)
+// Motion limits are now defined in SetupConstants.h as user-editable configuration
 
 // Fixed-point math definitions (Q24.8 format like ClearPath)
 #define FIXED_POINT_SHIFT 8
@@ -125,7 +114,6 @@ struct AxisConfig {
     // Status flags
     bool enabled;
     volatile bool moving;
-    bool invertDirection;     // Direction pin inversion
     bool invertEnable;        // Enable pin inversion
     bool invertStep;          // Step pin inversion
     

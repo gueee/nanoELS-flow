@@ -85,7 +85,6 @@ void ESP32MotionControl::initializeGPIO() {
     axes[0].pulsesPerMM = FLOAT_TO_FIXED(4000.0 / 4.0);  // 1000 pulses/mm (fixed-point)
     axes[0].maxVelocity = FLOAT_TO_FIXED(MAX_VELOCITY_X * 1000.0);  // Convert to steps/s
     axes[0].maxAcceleration = FLOAT_TO_FIXED(MAX_ACCELERATION_X * 1000.0);  // Convert to steps/s²
-    axes[0].invertDirection = INVERT_X;
     axes[0].invertEnable = INVERT_X_ENABLE;
     axes[0].invertStep = INVERT_X_STEP;
     
@@ -96,7 +95,6 @@ void ESP32MotionControl::initializeGPIO() {
     axes[1].pulsesPerMM = FLOAT_TO_FIXED(4000.0 / 5.0);  // 800 pulses/mm (fixed-point)
     axes[1].maxVelocity = FLOAT_TO_FIXED(MAX_VELOCITY_Z * 800.0);  // Convert to steps/s
     axes[1].maxAcceleration = FLOAT_TO_FIXED(MAX_ACCELERATION_Z * 800.0);  // Convert to steps/s²
-    axes[1].invertDirection = INVERT_Z;
     axes[1].invertEnable = INVERT_Z_ENABLE;
     axes[1].invertStep = INVERT_Z_STEP;
     
@@ -149,11 +147,11 @@ void ESP32MotionControl::initializeGPIO() {
     
     Serial.println("✓ GPIO initialized with hardware-specific inversion (fixed-point)");
     Serial.printf("  X-axis: Dir=%s, Enable=%s, Step=%s\n", 
-                 axes[0].invertDirection ? "INV" : "NORM",
+                 INVERT_X ? "INV" : "NORM",
                  axes[0].invertEnable ? "INV" : "NORM",
                  axes[0].invertStep ? "INV" : "NORM");
     Serial.printf("  Z-axis: Dir=%s, Enable=%s, Step=%s\n", 
-                 axes[1].invertDirection ? "INV" : "NORM",
+                 INVERT_Z ? "INV" : "NORM",
                  axes[1].invertEnable ? "INV" : "NORM",
                  axes[1].invertStep ? "INV" : "NORM");
     
@@ -260,7 +258,7 @@ void ESP32MotionControl::generateStepPulse(int axis) {
         
         // Update position based on step direction (fixed-point)
         bool direction = digitalRead(axes[axis].dirPin);
-        if (axes[axis].invertDirection) direction = !direction;
+        if ((axis == 0 && INVERT_X) || (axis == 1 && INVERT_Z)) direction = !direction;
         
         if (direction) {
             axes[axis].currentPosition += FIXED_POINT_SCALE;  // +1 step
@@ -419,7 +417,7 @@ void ESP32MotionControl::calculateMotionProfile(int axis, int32_t targetPos) {
     
     // Set direction with hardware-specific inversion
     bool direction = (targetPos > axes[axis].currentPosition);
-    if (axes[axis].invertDirection) direction = !direction;
+    if ((axis == 0 && INVERT_X) || (axis == 1 && INVERT_Z)) direction = !direction;
     digitalWrite(axes[axis].dirPin, direction ? HIGH : LOW);
     
     Serial.printf("Profile calculated: Axis %d, Distance=%d, AccelDist=%d, MaxVel=%d\n", 
@@ -534,7 +532,6 @@ void ESP32MotionControl::updateStepGeneration(int axis) {
     
     // Set direction based on error direction
     bool direction = error > 0;
-    if (axes[axis].invertDirection) direction = !direction;
     
     // Apply hardware-specific direction inversion
     bool dirState = direction;

@@ -37,7 +37,11 @@ https://espressif.github.io/arduino-esp32/package_esp32_index.json
 - **Upload Speed**: 921600
 - **USB Mode**: Hardware CDC and JTAG
 
-### Project Structure (Arduino IDE)
+### Project Structure
+
+The project supports both Arduino IDE and PlatformIO development environments:
+
+#### Arduino IDE Structure (Primary - `/nanoELS-flow/`)
 ```
 nanoELS-flow/                      # Arduino IDE project folder
 ├── nanoELS-flow.ino              # Main application file
@@ -50,6 +54,16 @@ nanoELS-flow/                      # Arduino IDE project folder
 ├── MyHardware.h/.txt            # Pin definitions (authoritative)
 └── indexhtml.h                  # Embedded web interface
 ```
+
+#### PlatformIO Structure (Alternative - `/src/`)
+```
+src/                              # PlatformIO source folder
+├── nanoELS-flow.ino              # Main application (mirrored)
+├── [same files as Arduino IDE]  # All source files mirrored
+└── platformio.ini                # PlatformIO configuration
+```
+
+**Important**: Both structures contain identical code. Arduino IDE structure is primary and authoritative.
 
 **Key Files:**
 - **nanoELS-flow.ino**: Main application file with state machine coordination
@@ -107,14 +121,32 @@ void taskMotionUpdate() {  // Runs at 200Hz
 
 ## Development Commands
 
-### Build and Upload
+### Build and Upload (Arduino IDE - Primary)
 ```bash
-# Use Arduino IDE 2.3.6+
+# Arduino IDE 2.3.6+
 # Board: ESP32S3 Dev Module
 # Upload Speed: 921600
 # Flash Size: 16MB
 # Partition: Huge APP (3MB No OTA/1MB SPIFFS)
+# USB CDC On Boot: Enabled
+# CPU Frequency: 240MHz (WiFi/BT)
+# Flash Mode: QIO
+# PSRAM: OPI PSRAM (if available)
 ```
+
+### Alternative: PlatformIO (Available but not primary)
+```bash
+# Build with PlatformIO (project structure also supports this)
+pio run
+
+# Upload to device
+pio run --target upload
+
+# Serial monitor
+pio device monitor
+```
+
+**Note**: Arduino IDE is the primary development environment. PlatformIO support exists but Arduino IDE is recommended for consistency with documentation.
 
 ### Hardware Configuration
 Edit motion parameters in `SetupConstants.cpp`:
@@ -125,7 +157,18 @@ Edit motion parameters in `SetupConstants.cpp`:
 
 ## WiFi Configuration
 
-The system supports two WiFi modes (set `WIFI_MODE` in main .ino file):
+Configure WiFi settings before uploading in main .ino file:
+
+```cpp
+// Line ~62 in nanoELS-flow.ino
+#define WIFI_MODE 1  // Change to 1 for home WiFi
+
+// Lines ~70-71 - Update with your WiFi credentials
+const char* HOME_WIFI_SSID = "YourWiFiNetwork";
+const char* HOME_WIFI_PASSWORD = "YourWiFiPassword";
+```
+
+The system supports two WiFi modes:
 
 ### Mode 0: Access Point
 - **SSID**: "nanoELS-flow"  
@@ -135,6 +178,7 @@ The system supports two WiFi modes (set `WIFI_MODE` in main .ino file):
 ### Mode 1: Home Network
 - **SSID**: Configurable in `HOME_WIFI_SSID`
 - **Password**: Configurable in `HOME_WIFI_PASSWORD`  
+- **Requirements**: 2.4GHz network (ESP32 doesn't support 5GHz)
 - **Fallback**: Automatically creates AP if connection fails
 - **Web Interface**: IP shown on Nextion display
 
@@ -173,6 +217,8 @@ Required libraries (install via Arduino IDE Library Manager):
 - **WebSockets by Markus Sattler**: For WebSocket communication
 - **PS2KeyAdvanced by Paul Carpenter**: For PS2 keyboard interface
 - **Native ESP32-S3**: No external stepper libraries - uses ESP32 hardware directly
+
+**IMPORTANT NOTE**: The ARDUINO_SETUP.md mentions FastAccelStepper but this has been completely removed from the current implementation. Do NOT install FastAccelStepper - the project now uses native ESP32-S3 hardware control.
 
 ### ESP32 Arduino Core Compatibility
 - **Version 3.x**: Uses new timer API (`timerBegin(frequency)`, `timerAlarm()`, `timerStart()`)
@@ -292,7 +338,10 @@ Required libraries (install via Arduino IDE Library Manager):
 - `@nanoELS-flow/schematics.png`: Reference schematic for project hardware configuration
 
 ### Project Memory
-- First, we don't use platformio right now, second we don't have serial monitor, just the nextion display!!!!
+- **Primary Development**: Arduino IDE is the primary development environment
+- **PlatformIO**: Available as alternative but Arduino IDE preferred for consistency
+- **Serial Monitor**: Only for initial setup and debugging - primary interface is Nextion display
+- **No FastAccelStepper**: Completely removed - native ESP32-S3 implementation only
 
 ### Project Memory
 - **Reference Guideline**: Always refer to @original-h5.ino/h5.ino for sanity check, all of what's in there is known to work! Don't blindly copy anything though, just use it as a debug reference for functionality not for hardware reference!

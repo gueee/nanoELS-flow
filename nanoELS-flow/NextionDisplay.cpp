@@ -3,6 +3,9 @@
 // Global instance
 NextionDisplay nextionDisplay;
 
+// External reference to t3 display mode flag
+extern bool t3DebugMode;
+
 NextionDisplay::NextionDisplay() {
   currentState = DISPLAY_STATE_BOOT;
   lastUpdate = 0;
@@ -205,7 +208,10 @@ void NextionDisplay::showMotionStatus() {
     statusLine += " READY";
   }
   
-  setStatusLine(statusLine);
+  // Only update t3 with normal status when not in debug mode
+  if (!t3DebugMode) {
+    setStatusLine(statusLine);
+  }
 }
 
 void NextionDisplay::showSystemStatus() {

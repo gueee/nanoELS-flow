@@ -74,11 +74,33 @@ float targetPositionZ = 0.0;  // Target position for Z-axis (mm)
 // Shared variable for emergency stop coordination
 volatile bool emergencyKeyDetected = false;
 
+// t3 display mode flag (false = normal status, true = debug info)
+bool t3DebugMode = false;
+
+// Arrow key state tracking for continuous movement
+struct ArrowKeyState {
+  bool isPressed;
+  uint32_t pressStartTime;
+  uint32_t lastRepeatTime;
+  uint32_t repeatInterval;
+};
+
+ArrowKeyState keyStates[4]; // LEFT, RIGHT, UP, DOWN
+#define KEY_LEFT_IDX 0
+#define KEY_RIGHT_IDX 1  
+#define KEY_UP_IDX 2
+#define KEY_DOWN_IDX 3
+
+// Timing configuration for continuous movement
+#define HOLD_THRESHOLD_MS 150        // Time to consider a "hold" vs "tap"
+#define MIN_REPEAT_INTERVAL_MS 20    // Fastest repeat rate (50Hz)
+#define MAX_REPEAT_INTERVAL_MS 500   // Slowest repeat rate (2Hz)
+
 // WiFi Configuration
 // Set WIFI_MODE to choose connection type:
 // 0 = Access Point mode (creates "nanoELS-flow" network)
 // 1 = Connect to existing WiFi network
-#define WIFI_MODE 1
+#define WIFI_MODE 0
 
 // Access Point credentials (when WIFI_MODE = 0)
 const char* AP_SSID = "nanoELS-flow";
@@ -99,6 +121,15 @@ void processKeypadEvent();  // Enhanced PS2 keyboard processing
 void checkEmergencyStop();  // Immediate emergency stop check
 void updateDisplay();   // Display update placeholder
 
+// Continuous movement functions
+int getKeyIndex(int keyCode);
+int getKeyCodeFromIndex(int index);
+uint32_t calculateRepeatInterval(float stepSize);
+void performArrowKeyMovement(int keyCode);
+void handleArrowKeyPress(int keyCode, int keyIndex);
+void handleArrowKeyRelease(int keyCode, int keyIndex);
+void resetArrowKeyStates();  // Reset all key states (for emergency stop)
+
 // Task functions for scheduler
 void taskEmergencyCheck();
 void taskKeyboardScan();
@@ -106,6 +137,10 @@ void taskMotionUpdate();
 void taskDisplayUpdate();
 void taskWebUpdate();
 void taskDiagnostics();
+void taskContinuousMovement();
+
+// Debug display function
+void updateDebugDisplay();
 
 void setup() {
   Serial.begin(115200);
@@ -165,9 +200,19 @@ void setup() {
   scheduler.addTask("EmergencyCheck", taskEmergencyCheck, PRIORITY_CRITICAL, 0);      // Every loop
   scheduler.addTask("KeyboardScan", taskKeyboardScan, PRIORITY_CRITICAL, 0);          // Every loop
   scheduler.addTask("MotionUpdate", taskMotionUpdate, PRIORITY_HIGH, 5);              // 200Hz
+  scheduler.addTask("ContinuousMovement", taskContinuousMovement, PRIORITY_HIGH, 10); // 100Hz
   scheduler.addTask("DisplayUpdate", taskDisplayUpdate, PRIORITY_NORMAL, 50);         // 20Hz
   scheduler.addTask("WebUpdate", taskWebUpdate, PRIORITY_NORMAL, 20);                 // 50Hz
   scheduler.addTask("Diagnostics", taskDiagnostics, PRIORITY_LOW, 5000);              // 0.2Hz
+  
+  // Initialize arrow key states for continuous movement
+  for (int i = 0; i < 4; i++) {
+    keyStates[i].isPressed = false;
+    keyStates[i].pressStartTime = 0;
+    keyStates[i].lastRepeatTime = 0;
+    keyStates[i].repeatInterval = 100;
+  }
+  Serial.println("✓ Continuous movement system initialized");
   
   // Enhanced keyboard processing enabled (based on original h5.ino approach)
   Serial.println("✓ Enhanced PS2 keyboard processing enabled");
@@ -284,6 +329,7 @@ void processKeypadEvent() {
         emergencyKeyDetected = true;
         esp32Motion.setEmergencyStop(true);
         esp32Motion.stopTestSequence();
+        resetArrowKeyStates();  // Stop any continuous movement
         nextionDisplay.showEmergencyStop();
       }
     }
@@ -295,32 +341,14 @@ void processKeypadEvent() {
   // Serial1.print("t0.txt=\"" + String(isPress ? "Press " : "Release ") + String(keyCode) + "\"");
   // Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
   
-  // Handle arrow keys like original h5.ino - both press AND release events
+  // Enhanced arrow key handling with continuous movement support
   if (keyCode == B_LEFT || keyCode == B_RIGHT || keyCode == B_UP || keyCode == B_DOWN) {
-    // REMOVED arrow key debug - was overwriting diagnostics
-    // Serial1.print("t3.txt=\"Arrow " + String(keyCode) + " " + String(isPress ? "PRESS" : "RELEASE") + "\"");
-    // Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+    int keyIndex = getKeyIndex(keyCode);
     
-    if (keyCode == B_LEFT) {
-      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-        // LEFT arrow = Z- (towards headstock)
-        targetPositionZ -= manualStepSize;
-      }
-    } else if (keyCode == B_RIGHT) {
-      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-        // RIGHT arrow = Z+ (towards tailstock)
-        targetPositionZ += manualStepSize;
-      }
-    } else if (keyCode == B_UP) {
-      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-        // UP arrow = X+ (towards operator, away from centerline)
-        targetPositionX += manualStepSize;
-      }
-    } else if (keyCode == B_DOWN) {
-      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-        // DOWN arrow = X- (towards workpiece, towards centerline)
-        targetPositionX -= manualStepSize;
-      }
+    if (isPress) {
+      handleArrowKeyPress(keyCode, keyIndex);
+    } else {
+      handleArrowKeyRelease(keyCode, keyIndex);
     }
     return; // Exit early for arrow keys
   }
@@ -360,16 +388,20 @@ void processKeypadEvent() {
         
       // Arrow keys are handled before the switch statement
       case B_STEP:   // Tilda - Change manual step size
-        if (abs(manualStepSize - 0.01) < 0.001) {
-          manualStepSize = 0.1;
-        } else if (abs(manualStepSize - 0.1) < 0.001) {
-          manualStepSize = 1.0;
-        } else if (abs(manualStepSize - 1.0) < 0.001) {
-          manualStepSize = 10.0;
-        } else {
-          manualStepSize = 0.01;  // Reset to start
+        {
+          float oldStepSize = manualStepSize;
+          if (abs(manualStepSize - 0.01) < 0.001) {
+            manualStepSize = 0.1;
+          } else if (abs(manualStepSize - 0.1) < 0.001) {
+            manualStepSize = 1.0;
+          } else if (abs(manualStepSize - 1.0) < 0.001) {
+            manualStepSize = 10.0;
+          } else {
+            manualStepSize = 0.01;  // Reset to start
+          }
+          Serial.printf("*** STEP SIZE CHANGED: %.3f -> %.3f mm ***\n", oldStepSize, manualStepSize);
+          nextionDisplay.showMessage("Step " + String(manualStepSize, 2) + "mm");
         }
-        nextionDisplay.showMessage("Step " + String(manualStepSize, 2) + "mm");
         break;
         
       case B_X_ENA:  // c - Enable/disable X axis (works even during emergency stop)
@@ -416,7 +448,11 @@ void processKeypadEvent() {
         }
         break;
         
-      case B_DISPL: { // Win - Display status and diagnostics
+      case B_DISPL: { // Win - Toggle t3 display mode (normal/debug)
+        // Toggle t3 display mode
+        t3DebugMode = !t3DebugMode;
+        
+        // Always print diagnostics to Serial for development
         esp32Motion.printDiagnostics();
         Serial.println("Test sequence status: " + esp32Motion.getTestSequenceStatus());
         Serial.printf("Manual step size: %.3f mm\n", manualStepSize);
@@ -425,25 +461,42 @@ void processKeypadEvent() {
         Serial.printf("Z-axis: %.3f mm (%s)\n", esp32Motion.getPosition(1), 
                      esp32Motion.isAxisEnabled(1) ? "ENABLED" : "DISABLED");
         
-        // Show ISR and pulse diagnostics - what we REALLY need to know
-        uint32_t isrExecutions = esp32Motion.isrCount;
-        uint32_t xPulses = esp32Motion.stepsPulsed[0];
-        uint32_t zPulses = esp32Motion.stepsPulsed[1];
-        
-        // Calculate ISR rate (should be ~2000Hz)
-        static uint32_t lastIsrCount = 0;
-        static uint32_t lastCheckTime = 0;
-        uint32_t currentTime = millis();
-        uint32_t isrRate = 0;
-        if (currentTime - lastCheckTime >= 1000) {  // Calculate every second
-          isrRate = isrExecutions - lastIsrCount;
-          lastIsrCount = isrExecutions;
-          lastCheckTime = currentTime;
+        if (t3DebugMode) {
+          // Show compact debug info on t3 when in debug mode
+          uint32_t isrExecutions = esp32Motion.isrCount;
+          uint32_t xPulses = esp32Motion.stepsPulsed[0];
+          uint32_t zPulses = esp32Motion.stepsPulsed[1];
+          
+          // Create rotating debug display to fit in ~20 characters
+          static uint8_t debugRotation = 0;
+          debugRotation = (debugRotation + 1) % 3;
+          
+          String debugText;
+          switch (debugRotation) {
+            case 0:
+              debugText = "DBG ISR:" + String(isrExecutions);
+              break;
+            case 1:
+              debugText = "XP:" + String(xPulses) + " ZP:" + String(zPulses);
+              break;
+            case 2:
+              debugText = "V" + String(esp32Motion.versionMajor) + " 2kHz Timer";
+              break;
+          }
+          
+          Serial1.print("t3.txt=\"" + debugText + "\"");
+          Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+          
+          nextionDisplay.showMessage("Debug mode ON");
+        } else {
+          // Clear t3 and let normal display take over
+          Serial1.print("t3.txt=\"\"");
+          Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+          
+          nextionDisplay.showMessage("Normal mode ON");
         }
         
-        Serial1.print("t3.txt=\"V" + String(esp32Motion.versionMajor) + " ISR:" + String(isrExecutions) + 
-                      " XP:" + String(xPulses) + " ZP:" + String(zPulses) + "\"");
-        Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+        Serial.printf("t3 display mode: %s\n", t3DebugMode ? "DEBUG" : "NORMAL");
         break;
       }
         
@@ -483,6 +536,7 @@ void taskEmergencyCheck() {
   if (emergencyKeyDetected) {
     esp32Motion.setEmergencyStop(true);
     esp32Motion.stopTestSequence();
+    resetArrowKeyStates();  // Stop any continuous movement
     nextionDisplay.showEmergencyStop();
     
     uint32_t currentTime = micros();
@@ -508,11 +562,15 @@ void taskMotionUpdate() {
   static float lastTargetZ = 0.0;
   
   if (targetPositionX != lastTargetX) {
+    Serial.printf("*** MOTION UPDATE X: %.3f -> %.3f (sending to motion controller) ***\n", 
+                  lastTargetX, targetPositionX);
     esp32Motion.setTargetPosition(0, targetPositionX);  // X-axis
     lastTargetX = targetPositionX;
   }
   
   if (targetPositionZ != lastTargetZ) {
+    Serial.printf("*** MOTION UPDATE Z: %.3f -> %.3f (sending to motion controller) ***\n", 
+                  lastTargetZ, targetPositionZ);
     esp32Motion.setTargetPosition(1, targetPositionZ);  // Z-axis
     lastTargetZ = targetPositionZ;
   }
@@ -524,6 +582,11 @@ void taskDisplayUpdate() {
   
   // Must call update() for splash screen timing
   nextionDisplay.update();
+  
+  // Update debug display when in debug mode
+  if (t3DebugMode && splashHandled) {
+    updateDebugDisplay();
+  }
   
   // Additional display updates can go here
   if (!splashHandled && millis() > 2000) {
@@ -553,5 +616,172 @@ void taskDiagnostics() {
     Serial.println("===================\n");
     
     lastDiagnosticRun = currentTime;
+  }
+}
+
+void resetArrowKeyStates() {
+  // Reset all arrow key states (called during emergency stop)
+  for (int i = 0; i < 4; i++) {
+    keyStates[i].isPressed = false;
+    keyStates[i].pressStartTime = 0;
+    keyStates[i].lastRepeatTime = 0;
+    keyStates[i].repeatInterval = 100;
+  }
+  Serial.println("Arrow key states reset due to emergency stop");
+}
+
+void updateDebugDisplay() {
+  // Update debug information on t3 display - runs at 20Hz
+  static uint32_t lastDebugUpdate = 0;
+  static uint8_t debugRotation = 0;
+  uint32_t currentTime = millis();
+  
+  // Rotate debug information every 2 seconds (40 cycles at 20Hz)
+  if (currentTime - lastDebugUpdate >= 2000) {
+    debugRotation = (debugRotation + 1) % 4;
+    lastDebugUpdate = currentTime;
+    
+    uint32_t isrExecutions = esp32Motion.isrCount;
+    uint32_t xPulses = esp32Motion.stepsPulsed[0];
+    uint32_t zPulses = esp32Motion.stepsPulsed[1];
+    
+    String debugText;
+    switch (debugRotation) {
+      case 0:
+        debugText = "DBG ISR:" + String(isrExecutions);
+        break;
+      case 1:
+        debugText = "XP:" + String(xPulses) + " ZP:" + String(zPulses);
+        break;
+      case 2:
+        debugText = "V" + String(esp32Motion.versionMajor) + " 2kHz Timer";
+        break;
+      case 3:
+        debugText = "Freq:" + String(scheduler.getLoopFrequency()) + "Hz";
+        break;
+    }
+    
+    Serial1.print("t3.txt=\"" + debugText + "\"");
+    Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+  }
+}
+
+// =============================================
+// Continuous Movement System Implementation
+// =============================================
+
+int getKeyIndex(int keyCode) {
+  switch(keyCode) {
+    case B_LEFT: return KEY_LEFT_IDX;
+    case B_RIGHT: return KEY_RIGHT_IDX;
+    case B_UP: return KEY_UP_IDX;
+    case B_DOWN: return KEY_DOWN_IDX;
+    default: return -1;
+  }
+}
+
+int getKeyCodeFromIndex(int index) {
+  switch(index) {
+    case KEY_LEFT_IDX: return B_LEFT;
+    case KEY_RIGHT_IDX: return B_RIGHT;
+    case KEY_UP_IDX: return B_UP;
+    case KEY_DOWN_IDX: return B_DOWN;
+    default: return 0;
+  }
+}
+
+uint32_t calculateRepeatInterval(float stepSize) {
+  // Scale repeat rate with step size (with SAFE speed for large steps)
+  // Large steps = fast movement, small steps = slow movement
+  
+  if (stepSize >= 10.0) {
+    return 60;   // ~16.5Hz for 10mm steps = 165mm/sec (SAFE SPEED)
+  } else if (stepSize >= 1.0) {
+    return 50;   // ~20Hz for 1mm steps = 20mm/sec
+  } else if (stepSize >= 0.1) {
+    return 100;  // ~10Hz for 0.1mm steps = 1mm/sec
+  } else {
+    return 200;  // ~5Hz for 0.01mm steps = 0.05mm/sec
+  }
+}
+
+void performArrowKeyMovement(int keyCode) {
+  // Common movement logic extracted from keyboard handler
+  float oldX = targetPositionX;
+  float oldZ = targetPositionZ;
+  
+  if (keyCode == B_LEFT) {
+    targetPositionZ -= manualStepSize;
+  } else if (keyCode == B_RIGHT) {
+    targetPositionZ += manualStepSize;
+  } else if (keyCode == B_UP) {
+    targetPositionX -= manualStepSize;  // Towards centerline, away from operator
+  } else if (keyCode == B_DOWN) {
+    targetPositionX += manualStepSize;  // Away from centerline, towards operator
+  }
+  
+  Serial.printf("*** ARROW MOVE: key=%d, stepSize=%.3f, X:%.3f->%.3f, Z:%.3f->%.3f ***\n", 
+                keyCode, manualStepSize, oldX, targetPositionX, oldZ, targetPositionZ);
+}
+
+void handleArrowKeyPress(int keyCode, int keyIndex) {
+  if (esp32Motion.getEmergencyStop() || esp32Motion.isTestSequenceActive()) {
+    return;
+  }
+  
+  ArrowKeyState& keyState = keyStates[keyIndex];
+  uint32_t currentTime = millis();
+  
+  if (!keyState.isPressed) {
+    // First press
+    keyState.isPressed = true;
+    keyState.pressStartTime = currentTime;
+    keyState.lastRepeatTime = currentTime;
+    keyState.repeatInterval = calculateRepeatInterval(manualStepSize);
+    
+    // Immediate movement on first press
+    performArrowKeyMovement(keyCode);
+    
+    Serial.printf("Key %d pressed - immediate move by %.2fmm (interval=%dms)\n", 
+                 keyCode, manualStepSize, keyState.repeatInterval);
+  }
+}
+
+void handleArrowKeyRelease(int keyCode, int keyIndex) {
+  ArrowKeyState& keyState = keyStates[keyIndex];
+  uint32_t currentTime = millis();
+  
+  if (keyState.isPressed) {
+    uint32_t holdDuration = currentTime - keyState.pressStartTime;
+    
+    Serial.printf("Key %d released after %dms\n", keyCode, holdDuration);
+    
+    keyState.isPressed = false;
+  }
+}
+
+void taskContinuousMovement() {
+  uint32_t currentTime = millis();
+  
+  for (int i = 0; i < 4; i++) {
+    ArrowKeyState& keyState = keyStates[i];
+    
+    if (keyState.isPressed) {
+      uint32_t holdDuration = currentTime - keyState.pressStartTime;
+      
+      // Start continuous movement after threshold
+      if (holdDuration >= HOLD_THRESHOLD_MS) {
+        if (currentTime - keyState.lastRepeatTime >= keyState.repeatInterval) {
+          int keyCode = getKeyCodeFromIndex(i);
+          performArrowKeyMovement(keyCode);
+          keyState.lastRepeatTime = currentTime;
+          
+          // Optional: Accelerate over time (make it faster the longer held)
+          if (keyState.repeatInterval > MIN_REPEAT_INTERVAL_MS) {
+            keyState.repeatInterval = keyState.repeatInterval * 0.95; // 5% faster each repeat
+          }
+        }
+      }
+    }
   }
 }
