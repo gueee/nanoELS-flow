@@ -45,10 +45,10 @@ const long STEP_TIME_MS = 500;           // Time for one manual step in millisec
 const long DELAY_BETWEEN_STEPS_MS = 80;  // Pause between manual steps in milliseconds
 
 // Motion control limits (converted to our system internally)
-const float MAX_VELOCITY_X_USER = 50.0;  // Maximum X velocity in mm/s
-const float MAX_VELOCITY_Z_USER = 50.0;  // Maximum Z velocity in mm/s
-const float MAX_ACCELERATION_X_USER = 500.0;  // Maximum X acceleration in mm/s²
-const float MAX_ACCELERATION_Z_USER = 500.0;  // Maximum Z acceleration in mm/s²
+const float MAX_VELOCITY_X_USER = 200.0;  // Maximum X velocity in mm/s (increased for manual jogging)
+const float MAX_VELOCITY_Z_USER = 200.0;  // Maximum Z velocity in mm/s (increased for manual jogging)
+const float MAX_ACCELERATION_X_USER = 2000.0;  // Maximum X acceleration in mm/s² (increased for manual jogging)
+const float MAX_ACCELERATION_Z_USER = 2000.0;  // Maximum Z acceleration in mm/s² (increased for manual jogging)
 
 // Advanced settings (normally no need to change)
 const long INCOMING_BUFFER_SIZE = 100000;  // WebSocket input buffer size

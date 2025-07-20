@@ -197,6 +197,12 @@ private:
     // Hardware initialization
     void initializeGPIO();
     void initializePID();
+    
+public:
+    // Debug counters
+    volatile uint32_t isrCount = 0;         // ISR execution counter
+    volatile uint32_t stepsPulsed[2] = {0, 0};  // Actual pulses generated per axis
+    int versionMajor = 0;  // ESP32 Arduino version for diagnostics
     void initializeStepTimers();
     
     // Safety

@@ -40,20 +40,21 @@ https://espressif.github.io/arduino-esp32/package_esp32_index.json
 ### Project Structure (Arduino IDE)
 ```
 nanoELS-flow/                      # Arduino IDE project folder
-├── nanoELS-flow.ino              # Main application file with setup section
+├── nanoELS-flow.ino              # Main application file
+├── SetupConstants.cpp/.h         # User-editable hardware configuration
 ├── ESP32MotionControl.h/.cpp     # Native ESP32-S3 motion control
 ├── NextionDisplay.h/.cpp         # Touch screen interface  
 ├── WebInterface.h/.cpp           # HTTP server and WebSocket
 ├── StateMachine.h/.cpp           # Non-blocking state machine
 ├── CircularBuffer.h              # Real-time circular buffer
-├── SetupConstants.h              # User-editable setup constants
 ├── MyHardware.h/.txt            # Pin definitions (authoritative)
 └── indexhtml.h                  # Embedded web interface
 ```
 
 **Key Files:**
-- **nanoELS-flow.ino**: Main application with user-editable setup section
-- **SetupConstants.h**: Header for Arduino IDE compatibility with setup constants
+- **nanoELS-flow.ino**: Main application file with state machine coordination
+- **SetupConstants.cpp**: User-editable hardware configuration (motor steps, encoders, limits)
+- **SetupConstants.h**: Header declarations for Arduino IDE compatibility
 - **MyHardware.txt**: Authoritative pin definitions and keyboard mappings
 
 ## Code Architecture
@@ -68,38 +69,59 @@ The application follows a modular architecture with three main subsystems:
 ### Key Architectural Patterns
 - **Native ESP32-S3 Implementation**: No external stepper libraries - uses ESP32 hardware timers, GPIO, and FreeRTOS tasks
 - **Task-Based Motion Control**: FreeRTOS task on Core 1 for real-time motion processing
-- **Circular Buffer Queue**: Real-time safe motion command queue with 64-command capacity
-- **Smooth MPG Control**: Velocity-based step scaling with acceleration/deceleration profiles
+- **Servo-Style Position Following**: Motion controller follows target position variables like a simple servo
+- **Simple Target Position Updates**: Arrow keys and MPGs update global position variables, motion controller follows
 - **Hardware Abstraction**: Pin definitions centralized in `MyHardware.txt` and `MyHardware.h`
 - **Emergency Stop Integration**: Immediate stop capability throughout all motion systems
+
+### Motion Control Architecture (CRITICAL)
+**Major Change**: FastAccelStepper has been completely removed and replaced with native ESP32-S3 implementation:
+
+- **FreeRTOS Task**: Motion control runs on Core 1 with 1ms update rate
+- **Hardware Timer ISR**: 2kHz step generation using ESP32 hardware timers
+- **Multi-Step ISR**: Can generate up to 50 steps per ISR cycle for high-speed movement
+- **Target Position Following**: Motion controller follows `targetPositionX` and `targetPositionZ` variables
+- **Emergency Stop**: Highest priority - checked on every step and task cycle
+
+### Manual Control System
+**Simple Architecture**: 
+- **Global Variables**: `targetPositionX` and `targetPositionZ` hold target positions
+- **Arrow Keys**: Simply update target position variables by step size amount
+- **Motion Controller**: Continuously follows target positions using motion profiles
+- **Update Detection**: Only sends new targets when position variables actually change
 
 ### Main Application Flow
 The main application (`nanoELS-flow.ino`) coordinates all subsystems:
 ```cpp
 void loop() {
-  esp32Motion.update();      // Process MPG inputs (motion control runs in separate task)
-  webInterface.update();     // Handle HTTP/WebSocket requests  
-  nextionDisplay.update();   // Update display and process touch events
-  handleKeyboard();          // Process PS2 keyboard input
-  processMovement();         // Handle movement logic and status updates
+  scheduler.update();  // Non-blocking state machine at ~100kHz
+}
+
+void taskMotionUpdate() {  // Runs at 200Hz
+  esp32Motion.update();
+  // Only update when target positions change
+  if (targetPositionX != lastTargetX) esp32Motion.setTargetPosition(0, targetPositionX);
+  if (targetPositionZ != lastTargetZ) esp32Motion.setTargetPosition(1, targetPositionZ);
 }
 ```
 
-### Motion Control Architecture
-**Critical Changes**: FastAccelStepper has been completely removed and replaced with native ESP32-S3 implementation:
+## Development Commands
 
-- **FreeRTOS Task**: Motion control runs on Core 1 with 1ms update rate
-- **Direct MPG Control**: Immediate response without buffering for MPG inputs
-- **Smooth MPG Scaling**: Velocity-based step scaling from 0.01mm to 0.5mm per detent
-- **Acceleration Profiles**: Smooth acceleration/deceleration with sub-100μs timing
-- **Emergency Stop**: Highest priority - checked on every step and task cycle
+### Build and Upload
+```bash
+# Use Arduino IDE 2.3.6+
+# Board: ESP32S3 Dev Module
+# Upload Speed: 921600
+# Flash Size: 16MB
+# Partition: Huge APP (3MB No OTA/1MB SPIFFS)
+```
 
-### MPG Control System
-The MPG system features sophisticated velocity-based control:
-- **Velocity Detection**: Tracks encoder counts per second for responsive scaling
-- **Step Scaling**: Linear interpolation between 0.01mm (slow) and 0.5mm (fast) per detent
-- **Smooth Motion**: Acceleration/deceleration profiles with 20-100μs step intervals
-- **Emergency Stop**: Immediate stop capability on every step
+### Hardware Configuration
+Edit motion parameters in `SetupConstants.cpp`:
+- Motor steps per revolution: `MOTOR_STEPS_X`, `MOTOR_STEPS_Z`
+- Lead screw pitch: `SCREW_X_DU`, `SCREW_Z_DU` (in deci-microns)
+- Velocity limits: `MAX_VELOCITY_X_USER`, `MAX_VELOCITY_Z_USER`
+- Acceleration: `MAX_ACCELERATION_X_USER`, `MAX_ACCELERATION_Z_USER`
 
 ## WiFi Configuration
 
@@ -114,41 +136,34 @@ The system supports two WiFi modes (set `WIFI_MODE` in main .ino file):
 - **SSID**: Configurable in `HOME_WIFI_SSID`
 - **Password**: Configurable in `HOME_WIFI_PASSWORD`  
 - **Fallback**: Automatically creates AP if connection fails
-- **Web Interface**: IP shown in serial monitor
+- **Web Interface**: IP shown on Nextion display
 
-## Debugging and Testing
+## Debugging and Development
 
-### Serial Monitor Output
-- **Baud Rate**: 115200
-- **Motion Status**: Real-time MPG debugging with velocity and scaling information
-- **Diagnostics**: Use keyboard 'Win' key or call `esp32Motion.printDiagnostics()`
+### Critical Debugging Rules
+- **NO SERIAL MONITOR**: All debugging output must go to Nextion display
+- **Use Direct Serial1 Commands**: `Serial1.print("t3.txt=\"message\""); Serial1.write(0xFF,0xFF,0xFF);`
+##- **Reference Original**: Check `@original-h5.ino/h5.ino` for working implementations
+- **Display Objects**: t0, t1, t2, t3 available for debug output on Nextion
 
 ### Motion Control Testing
-- **MPG Testing**: Rotate X/Z axis MPGs - should show smooth movement with velocity-based scaling
+- **Win Key Diagnostics**: Shows ISR count, step pulse counts, version info
+- **Target Position Updates**: Arrow keys update global position variables
 - **Emergency Stop**: ESC key (B_OFF) stops all motion immediately
-- **Manual Control**: Use arrow keys for axis movement
-- **Velocity Scaling**: Fast MPG rotation increases step size up to 0.5mm per detent
-
-### Development Testing Flow
-1. **Hardware Verification**: Enable axes and test basic movement
-2. **MPG Testing**: Verify smooth velocity-based scaling (0.01mm to 0.5mm per detent)
-3. **Emergency Stop**: Test immediate stop with ESC key
-4. **Web Interface**: Access via IP address shown in serial output
-5. **Display Testing**: Touch screen interactions via NextionDisplay module
+- **Manual Control**: Step sizes: 0.01mm, 0.1mm, 1.0mm, 10.0mm (Tilda key cycles)
 
 ### Current Implementation Status
 **✅ Working Features**:
 - Native ESP32-S3 motion control system (no external libraries)
-- Smooth MPG control with velocity-based step scaling
-- Task-based motion control with FreeRTOS
-- Real-time circular buffer motion queue
-- Immediate emergency stop functionality
-- Nextion display with 1300ms splash screen
+- Target position following with motion profiles
+- Task-based motion control with FreeRTOS (Core 1)
+- Multi-step ISR for high-speed movement (up to 100,000 steps/sec)
+- Nextion display with direct Serial1 communication
 - PS2 keyboard interface with full key mapping
 - Web interface with HTTP and WebSocket support
 
 **🔧 Current Functionality**:
-- **Manual Mode**: Smooth MPG control with velocity-based scaling
+- **Manual Mode**: Arrow keys update target positions, motion controller follows
 - **Emergency Stop**: Immediate response to ESC key
 - **Motion Control**: Task-based stepper control with acceleration profiles
 - **Display**: Real-time status and position updates
@@ -159,18 +174,10 @@ Required libraries (install via Arduino IDE Library Manager):
 - **PS2KeyAdvanced by Paul Carpenter**: For PS2 keyboard interface
 - **Native ESP32-S3**: No external stepper libraries - uses ESP32 hardware directly
 
-### Development Libraries (Built-in with ESP32 Core)
-- **WiFi**: ESP32 WiFi functionality
-- **WebServer**: HTTP server capabilities
-- **Preferences**: Configuration storage
-- **LittleFS**: File system support
-
-### File Organization Rules
-- **Main application**: `nanoELS-flow/nanoELS-flow.ino` (Arduino IDE project)
-- **Setup constants**: `nanoELS-flow/SetupConstants.h` (user-editable configuration)
-- **Hardware definitions**: `nanoELS-flow/MyHardware.txt` (authoritative pin mappings)
-- **Core modules**: `nanoELS-flow/*.h` and `nanoELS-flow/*.cpp` (modular architecture)
-- **Web assets**: `nanoELS-flow/indexhtml.h` (embedded web interface)
+### ESP32 Arduino Core Compatibility
+- **Version 3.x**: Uses new timer API (`timerBegin(frequency)`, `timerAlarm()`, `timerStart()`)
+- **Version 2.x**: Uses legacy timer API (`timerBegin(num, prescaler, countUp)`, `timerAlarmWrite()`)
+- **Auto-detection**: Code automatically detects and uses appropriate API
 
 ## PROJECT RULES - MANDATORY FOR ALL DEVELOPMENT
 
@@ -181,9 +188,9 @@ Required libraries (install via Arduino IDE Library Manager):
 
 ### Hardware Specifications - H5 Variant
 - **MCU**: ESP32-S3 with dual-core CPU
-- **Display**: Touch screen interface
+- **Display**: Nextion touch screen interface
 - **Axes**: 3-axis controller (X, Z, Spindle) - Y axis NOT implemented
-- **Interface**: Touch screen + physical controls
+- **Interface**: Touch screen + PS2 keyboard + physical controls
 
 ### Pin Definitions - NEVER CHANGE
 **CRITICAL RULE**: Pin definitions must remain constant throughout the entire project. Any pin assignment made initially is PERMANENT and cannot be modified.
@@ -225,15 +232,15 @@ Required libraries (install via Arduino IDE Library Manager):
 **CRITICAL**: The project uses a native ESP32-S3 implementation:
 - **NO FastAccelStepper**: Completely removed from the project
 - **Task-Based Control**: FreeRTOS task on Core 1 for motion processing
-- **Interrupt-Based Encoders**: Optimized quadrature decoding with lookup tables
-- **Smooth MPG Control**: Velocity-based step scaling with acceleration profiles
+- **Multi-Step ISR**: Hardware timer ISR can generate up to 50 steps per cycle
+- **Target Position Following**: Simple servo-style architecture
 - **Emergency Stop Priority**: Highest priority safety system
 
 ### Code Architecture Rules
 1. **Native ESP32-S3 Only**: No external stepper libraries allowed
 2. **Task-Based Motion**: All motion control via FreeRTOS tasks
-3. **Circular Buffer**: Real-time safe motion queue (no std::queue)
-4. **Interrupt-Based Encoders**: Hardware-optimized encoder handling
+3. **Target Position Variables**: Global `targetPositionX` and `targetPositionZ` 
+4. **Simple Updates**: Arrow keys and MPGs only update position variables
 5. **Emergency Stop Integration**: Must be checked throughout all motion systems
 
 ### Development Constraints
@@ -241,76 +248,37 @@ Required libraries (install via Arduino IDE Library Manager):
 - **ESP32-S3 Only**: Do not consider other microcontrollers
 - **No External Stepper Libraries**: Use native ESP32-S3 implementation only
 - **Fixed Pins**: Pin assignments are permanent once set
-- **Touch Primary**: Touch screen is primary interface
+- **Nextion Primary**: Nextion display is primary interface, NO serial monitor
 
-### Testing Requirements
-- **MPG Smoothness**: Verify velocity-based step scaling works smoothly
-- **Emergency Stop**: Test immediate stop response (<10ms)
-- **Motion Profiles**: Verify smooth acceleration/deceleration
-- **Task Performance**: Monitor FreeRTOS task timing and performance
-
-### Documentation Standards
-- **Pin Mappings**: Maintain permanent pin assignment documentation (see MyHardware.txt)
-- **Motion Control**: Document native ESP32-S3 implementation patterns
-- **MPG Behavior**: Document velocity-based scaling parameters
-- **Emergency Stop**: Document safety system integration
-- **Hardware File**: MyHardware.txt is the authoritative source for all pin definitions and key mappings
+### Hardware Configuration
+- **Spindle Encoder**: 600 PPR (pulses per revolution)
+- **Z-axis Motor**: 4000 steps per revolution, 5mm lead screw = 800 steps/mm
+- **X-axis Motor**: 4000 steps per revolution, 4mm lead screw = 1000 steps/mm
+- **Manual Speeds**: Configurable via `SPEED_MANUAL_MOVE_X/Z` constants
 
 ### Personal Keyboard Mapping (Development Configuration)
 **Movement Controls**:
 - B_LEFT (68): Left arrow - Z axis left movement
 - B_RIGHT (75): Right arrow - Z axis right movement  
-- B_UP (85): Up arrow - X axis forward movement
-- B_DOWN (72): Down arrow - X axis backward movement
+- B_UP (85): Up arrow - X axis away from centerline (towards operator)
+- B_DOWN (72): Down arrow - X axis towards centerline (towards workpiece)
 
 **Operation Controls**:
 - B_ON (50): Enter - starts operation/mode
 - B_OFF (145): ESC - **IMMEDIATE EMERGENCY STOP**
-- B_PLUS (87): Numpad plus - increment pitch/passes
-- B_MINUS (73): Numpad minus - decrement pitch/passes
+- B_STEP (86): Tilda (~) - cycle step size (0.01/0.1/1.0/10.0mm)
+- B_X_ENA (67): c - Enable/disable X axis
+- B_Z_ENA (113): q - Enable/disable Z axis
 
-**Critical Safety Note**: B_OFF (ESC key) triggers immediate emergency stop regardless of mode or operation state.
+**Critical Safety Note**: B_OFF (ESC key) toggles emergency stop - press once to activate, press again to clear.
 
-## Project Memories and Notes
-
-### Critical Architecture Changes
-- **FastAccelStepper Removed**: Completely replaced with native ESP32-S3 implementation
-- **Task-Based Motion Control**: FreeRTOS task on Core 1 for real-time processing
-- **Smooth MPG Control**: Velocity-based step scaling eliminates jerky movement
-- **Emergency Stop Priority**: Highest priority safety system integrated throughout
-
-### Motor Movement Mapping
-- 4000 steps equals 4mm movement on x and 5mm movement on z
-- MPG encoders: Velocity-based scaling from 0.01mm to 0.5mm per detent
-- Step resolution: 0.002mm per step (5000 steps/mm)
-
-### System Communication Notes
-- Serial output available at 115200 baud
-- Nextion display: 1300ms splash screen on boot (mandatory)
-- MPG debug output shows velocity and scaling information
-
-### Development Environment
-- **Arduino IDE version 2.3.6** (primary development environment)
-- **Single folder structure**: `nanoELS-flow/` contains all project files
-- **Setup section**: User-editable constants at top of main .ino file
-
-**CRITICAL REMINDERS**:
-1. Target is ESP32-S3-dev board (H5 variant) ONLY
-2. NO external stepper libraries - native ESP32-S3 implementation only
-3. Pin definitions are PERMANENT once assigned
-4. Task-based motion control with FreeRTOS
-5. Emergency stop has highest priority throughout system
-6. Y-axis is NOT implemented - ignore completely
-7. MPG control uses velocity-based step scaling for smooth operation
-
-## Project Testing Notes
-
-### Testing Approach
-- **No serial output**: I test on the actual machine and measure movements using a dial gauge
-
-## License
-
-This project is licensed under GPL-3.0, maintaining compatibility with the original nanoELS project while allowing for the complete rewrite approach.
+### User Interface and Feedback
+- **Primary Interface**: Nextion display provides all user feedback and status information
+- **NO SERIAL MONITOR**: All debugging must go to Nextion display
+- **Keyboard Controls**: PS2 keyboard for all manual control and emergency stop
+- **Emergency Stop Flow**: ESC activates emergency stop → ESC again clears → system ready
+- **Target Position Updates**: Arrow keys update global position variables
+- **Step Size Control**: Tilda (~) key cycles through step sizes
 
 ## Project Memories and Notes
 
@@ -322,3 +290,12 @@ This project is licensed under GPL-3.0, maintaining compatibility with the origi
 
 ### Memory: Schematics Reference
 - `@nanoELS-flow/schematics.png`: Reference schematic for project hardware configuration
+
+### Project Memory
+- First, we don't use platformio right now, second we don't have serial monitor, just the nextion display!!!!
+
+### Project Memory
+- **Reference Guideline**: Always refer to @original-h5.ino/h5.ino for sanity check, all of what's in there is known to work! Don't blindly copy anything though, just use it as a debug reference for functionality not for hardware reference!
+
+### Project Memory
+- All axis are enabled, no need to check that, that works!!!!

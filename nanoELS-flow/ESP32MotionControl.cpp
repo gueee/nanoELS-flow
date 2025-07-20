@@ -198,12 +198,30 @@ void ESP32MotionControl::initializeStepTimers() {
     // Initialize single step generator timer (2kHz like ClearPath)
     // Dual compatibility for Arduino IDE 3.x and PlatformIO 2.x
     
+    // Check which API version we're using
+    #ifdef ESP_ARDUINO_VERSION_MAJOR
+        versionMajor = ESP_ARDUINO_VERSION_MAJOR;
+    #else
+        versionMajor = 2;  // Legacy/2.x API
+    #endif
+    
     #ifdef ESP_ARDUINO_VERSION_MAJOR
         #if ESP_ARDUINO_VERSION_MAJOR >= 3
-            // Arduino IDE ESP32 3.x API
-            stepGeneratorTimer = timerBegin(2000);  // 2kHz frequency
-            timerAttachInterrupt(stepGeneratorTimer, &stepGeneratorISR);
-            Serial.println("✓ Step generator timer initialized (2kHz) - Arduino 3.x API");
+            // Arduino IDE ESP32 3.x API - CORRECT implementation
+            // For 2kHz interrupt rate, we need a base frequency higher than 2kHz
+            // Using 1MHz base frequency for precise timing control
+            stepGeneratorTimer = timerBegin(1000000);  // 1MHz base frequency
+            
+            if (stepGeneratorTimer != nullptr) {
+                // Attach the interrupt handler
+                timerAttachInterrupt(stepGeneratorTimer, &stepGeneratorISR);
+                
+                // Set alarm value: 1MHz / 500 = 2kHz interrupt rate
+                timerAlarm(stepGeneratorTimer, 500, true, 0);  // 500 ticks = 500μs period
+                
+                // Timer should auto-start after timerAlarm, but call start to be sure
+                timerStart(stepGeneratorTimer);
+            }
         #else
             // Arduino IDE ESP32 2.x API  
             stepGeneratorTimer = timerBegin(0, 80, true);  // Timer 0, prescaler 80, count up
@@ -241,6 +259,7 @@ void ESP32MotionControl::initializeTestSequence() {
 
 void IRAM_ATTR ESP32MotionControl::stepGeneratorISR() {
     if (instance) {
+        instance->isrCount++;  // Track ISR executions
         // 2kHz step generator - handles both axes
         instance->generateStepPulse(0);  // X-axis
         instance->generateStepPulse(1);  // Z-axis
@@ -261,26 +280,31 @@ void ESP32MotionControl::generateStepPulse(int axis) {
         axes[axis].stepState = false;
         axes[axis].stepPending = false;
     } else if (axes[axis].stepPending || axes[axis].stepsToGo > 0) {
+        // Generate multiple steps per ISR cycle for high speeds
+        int32_t stepsThisCycle = min(axes[axis].stepsToGo, (int32_t)50);  // Max 50 steps per cycle
+        if (stepsThisCycle < 1) stepsThisCycle = 1;
+        
         // Step pulse HIGH phase (considering inversion)
         bool highState = axes[axis].invertStep ? LOW : HIGH;
         digitalWrite(axes[axis].stepPin, highState);
         axes[axis].stepState = true;
         axes[axis].stepPending = true;
         
-        // Update position and counters
-        axes[axis].stepCount++;
+        // Update position and counters for all steps in this cycle
+        axes[axis].stepCount += stepsThisCycle;
+        stepsPulsed[axis] += stepsThisCycle;  // Track actual pulses
         if (axes[axis].stepsToGo > 0) {
-            axes[axis].stepsToGo--;
+            axes[axis].stepsToGo -= stepsThisCycle;
         }
         
-        // Update position based on step direction (fixed-point)
+        // Update position based on step direction for all steps
         bool direction = digitalRead(axes[axis].dirPin);
         if (axes[axis].invertDirection) direction = !direction;
         
         if (direction) {
-            axes[axis].currentPosition += FIXED_POINT_SCALE;  // +1 step
+            axes[axis].currentPosition += stepsThisCycle;  // +N steps
         } else {
-            axes[axis].currentPosition -= FIXED_POINT_SCALE;  // -1 step
+            axes[axis].currentPosition -= stepsThisCycle;  // -N steps
         }
     }
 }
@@ -437,8 +461,9 @@ void ESP32MotionControl::calculateMotionProfile(int axis, int32_t targetPos) {
     if (axes[axis].invertDirection) direction = !direction;
     digitalWrite(axes[axis].dirPin, direction ? HIGH : LOW);
     
-    Serial.printf("Profile calculated: Axis %d, Distance=%d, AccelDist=%d, MaxVel=%d\n", 
-                 axis, profile.totalDistance, profile.accelDistance, maxVel);
+    Serial.printf("Profile calculated: Axis %d, Distance=%d, AccelDist=%d, MaxVel=%d, MoveActive=%s\n", 
+                 axis, profile.totalDistance, profile.accelDistance, maxVel, 
+                 profile.moveActive ? "YES" : "NO");
 }
 
 // Update motion profile phase
@@ -524,7 +549,9 @@ void ESP32MotionControl::updateStepTiming(int axis) {
     int32_t velocityHz = FIXED_TO_FLOAT(velocity);
     int32_t stepsNeeded = (velocityHz * 500) / 1000000;  // steps in 500μs
     
+    // Allow multiple steps per ISR cycle for high speeds
     if (stepsNeeded < 1) stepsNeeded = 1;  // Minimum 1 step
+    if (stepsNeeded > 50) stepsNeeded = 50;  // Maximum 50 steps per cycle (safety limit)
     
     axes[axis].stepsToGo = stepsNeeded;
 }
@@ -687,6 +714,7 @@ bool ESP32MotionControl::moveRelative(int axis, int steps) {
     
     return setTargetPosition(axis, targetPosMM);
 }
+
 
 float ESP32MotionControl::getPosition(int axis) {
     if (axis < 0 || axis >= 2) return 0.0;

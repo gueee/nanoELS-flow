@@ -49,7 +49,16 @@ bool WebInterface::initializeWiFi(const char* ssid, const char* password) {
   Serial.print("MAC Address: ");
   Serial.println(WiFi.macAddress());
   
-  // Start connection
+  // ESP32-S3 specific WiFi fixes
+  // Clear any stored WiFi credentials that might interfere
+  WiFi.disconnect(true, true);  // disconnect and clear stored credentials
+  delay(100);
+  
+  // Set specific WiFi parameters for ESP32-S3
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Maximum TX power for better connection
+  WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);  // Minimum security level
+  
+  // Start connection with explicit BSSID (helps with mesh networks)
   WiFi.begin(ssid, password);
   
   int attempts = 0;

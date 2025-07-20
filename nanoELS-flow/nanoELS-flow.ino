@@ -67,6 +67,10 @@ Preferences prefs;
 int currentMode = 0;  // 0=manual, 1=threading, etc.
 float manualStepSize = 1.0;  // Current step size for manual movements (mm)
 
+// Target position variables (simple servo architecture)
+float targetPositionX = 0.0;  // Target position for X-axis (mm)
+float targetPositionZ = 0.0;  // Target position for Z-axis (mm)
+
 // Shared variable for emergency stop coordination
 volatile bool emergencyKeyDetected = false;
 
@@ -83,14 +87,15 @@ const char* AP_PASSWORD = "nanoels123";
 // Home WiFi credentials are defined in setup section above
 
 // WiFi troubleshooting options
-#define WIFI_CONNECTION_TIMEOUT 40  // seconds to wait for connection
-#define WIFI_RETRY_COUNT 3          // number of connection attempts
+#define WIFI_CONNECTION_TIMEOUT 20  // seconds to wait for connection
+#define WIFI_RETRY_COUNT 2          // number of connection attempts
 #define FALLBACK_TO_AP true         // create AP if WiFi connection fails
 
 // Function Prototypes
 // ==================
 void initializeWebInterface();  // Web interface initialization
 void handleKeyboard();  // Basic keyboard handling
+void processKeypadEvent();  // Enhanced PS2 keyboard processing
 void checkEmergencyStop();  // Immediate emergency stop check
 void updateDisplay();   // Display update placeholder
 
@@ -163,6 +168,9 @@ void setup() {
   scheduler.addTask("DisplayUpdate", taskDisplayUpdate, PRIORITY_NORMAL, 50);         // 20Hz
   scheduler.addTask("WebUpdate", taskWebUpdate, PRIORITY_NORMAL, 20);                 // 50Hz
   scheduler.addTask("Diagnostics", taskDiagnostics, PRIORITY_LOW, 5000);              // 0.2Hz
+  
+  // Enhanced keyboard processing enabled (based on original h5.ino approach)
+  Serial.println("✓ Enhanced PS2 keyboard processing enabled");
   
   Serial.println("✓ State machine scheduler initialized");
   Serial.println("✓ Non-blocking operation enabled");
@@ -243,130 +251,129 @@ void initializeWebInterface() {
 
 // Keyboard and display initialization removed - handled in setup()
 
-void handleKeyboard() {
-  // Enhanced keyboard handling for test control and manual movement
-  if (keyboard.available()) {
-    uint16_t key = keyboard.read();
+void processKeypadEvent() {
+  // Enhanced keyboard processing based on original h5.ino approach
+  if (!keyboard.available()) {
+    return;
+  }
+  
+  uint16_t event = keyboard.read();
+  int keyCode = event & 0xFF;
+  bool isPress = !(event & PS2_BREAK);
+  
+  // Track timing for debugging and safety
+  static unsigned long keypadTimeUs = 0;
+  keypadTimeUs = micros();
+  
+  // Some keyboards send this code and expect an answer to initialize
+  if (keyCode == 170) {
+    keyboard.echo();
+    return;
+  }
+  
+  // Emergency stop (B_OFF) gets highest priority - handle immediately on press
+  if (keyCode == B_OFF) {
+    if (isPress) {
+      if (esp32Motion.getEmergencyStop()) {
+        // Clear emergency stop
+        esp32Motion.setEmergencyStop(false);
+        nextionDisplay.setState(DISPLAY_STATE_NORMAL);
+        nextionDisplay.showMessage("SYSTEM READY");
+      } else {
+        // Activate emergency stop
+        emergencyKeyDetected = true;
+        esp32Motion.setEmergencyStop(true);
+        esp32Motion.stopTestSequence();
+        nextionDisplay.showEmergencyStop();
+      }
+    }
+    return;
+  }
+  
+  // Debug: Show key codes using DIRECT Nextion commands like original h5.ino
+  // REMOVED - was overwriting important diagnostics
+  // Serial1.print("t0.txt=\"" + String(isPress ? "Press " : "Release ") + String(keyCode) + "\"");
+  // Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+  
+  // Handle arrow keys like original h5.ino - both press AND release events
+  if (keyCode == B_LEFT || keyCode == B_RIGHT || keyCode == B_UP || keyCode == B_DOWN) {
+    // REMOVED arrow key debug - was overwriting diagnostics
+    // Serial1.print("t3.txt=\"Arrow " + String(keyCode) + " " + String(isPress ? "PRESS" : "RELEASE") + "\"");
+    // Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
     
-    // Process key according to MyHardware.txt mappings
-    switch (key) {
-      case B_ON:     // ENTER - Start/Restart test sequence (only when not in emergency)
-        if (!esp32Motion.getEmergencyStop()) {
-          if (esp32Motion.isTestSequenceActive()) {
-            // Restart if already running
-            esp32Motion.restartTestSequence();
-          } else {
-            // Start fresh or restart after completion
-            if (esp32Motion.isTestSequenceCompleted()) {
-              esp32Motion.restartTestSequence();
-            } else {
-              esp32Motion.startTestSequence();
-            }
-          }
-        } else {
-          // Show message on display that emergency stop is active
-          nextionDisplay.showMessage("E-STOP ACTIVE - Press ESC");
-        }
-        break;
+    if (keyCode == B_LEFT) {
+      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
+        // LEFT arrow = Z- (towards headstock)
+        targetPositionZ -= manualStepSize;
+      }
+    } else if (keyCode == B_RIGHT) {
+      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
+        // RIGHT arrow = Z+ (towards tailstock)
+        targetPositionZ += manualStepSize;
+      }
+    } else if (keyCode == B_UP) {
+      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
+        // UP arrow = X+ (towards operator, away from centerline)
+        targetPositionX += manualStepSize;
+      }
+    } else if (keyCode == B_DOWN) {
+      if (isPress && !esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
+        // DOWN arrow = X- (towards workpiece, towards centerline)
+        targetPositionX -= manualStepSize;
+      }
+    }
+    return; // Exit early for arrow keys
+  }
+  
+  // Only process key presses (not releases) for other keys
+  if (!isPress) {
+    return;
+  }
+  
+  // Process key according to MyHardware.txt mappings
+  // Processing key
+  switch (keyCode) {
+    case B_ON:     // ENTER - Start/Restart test sequence (only when not in emergency)
+      if (!esp32Motion.getEmergencyStop()) {
+        bool isActive = esp32Motion.isTestSequenceActive();
+        bool isCompleted = esp32Motion.isTestSequenceCompleted();
         
-      case B_OFF:    // ESC - Toggle emergency stop (clear if active, activate if clear)
-        if (esp32Motion.getEmergencyStop()) {
-          // Clear emergency stop
-          esp32Motion.setEmergencyStop(false);
-          nextionDisplay.setState(DISPLAY_STATE_NORMAL);
-          nextionDisplay.showMessage("SYSTEM READY");
-        } else {
-          // Activate emergency stop
-          emergencyKeyDetected = true;
-          esp32Motion.setEmergencyStop(true);
-          esp32Motion.stopTestSequence();
-          nextionDisplay.showEmergencyStop();
-        }
-        break;
+        Serial.printf("ENTER pressed - Active: %s, Completed: %s\n", 
+                     isActive ? "true" : "false", isCompleted ? "true" : "false");
         
-      // Manual movement controls
-      case B_LEFT:   // Left arrow - Z axis left movement
-        if (!esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-          float currentPos = esp32Motion.getPosition(1); // Z-axis is index 1
-          float targetPos = currentPos - manualStepSize;
-          if (esp32Motion.isPositionSafe(1, targetPos)) {
-            esp32Motion.setTargetPosition(1, targetPos);
-            nextionDisplay.showMessage("Z← " + String(manualStepSize) + "mm");
-          } else {
-            nextionDisplay.showMessage("Z limit reached");
-          }
-        } else if (esp32Motion.getEmergencyStop()) {
-          nextionDisplay.showMessage("E-STOP - Press ESC");
+        if (isActive) {
+          // Test sequence is running - restart it
+          Serial.println("Restarting active test sequence");
+          esp32Motion.restartTestSequence();
+          nextionDisplay.showMessage("Test restarted");
         } else {
-          nextionDisplay.showMessage("TEST RUNNING");
+          // Test sequence is not running - start it
+          Serial.println("Starting test sequence");
+          esp32Motion.startTestSequence();
+          nextionDisplay.showMessage("Test started");
         }
-        break;
+      } else {
+        // Show message on display that emergency stop is active
+        nextionDisplay.showMessage("E-STOP ACTIVE - Press ESC");
+      }
+      break;
         
-      case B_RIGHT:  // Right arrow - Z axis right movement
-        if (!esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-          float currentPos = esp32Motion.getPosition(1); // Z-axis is index 1
-          float targetPos = currentPos + manualStepSize;
-          if (esp32Motion.isPositionSafe(1, targetPos)) {
-            esp32Motion.setTargetPosition(1, targetPos);
-            nextionDisplay.showMessage("Z→ " + String(manualStepSize) + "mm");
-          } else {
-            nextionDisplay.showMessage("Z limit reached");
-          }
-        } else if (esp32Motion.getEmergencyStop()) {
-          nextionDisplay.showMessage("E-STOP - Press ESC");
-        } else {
-          nextionDisplay.showMessage("TEST RUNNING");
-        }
-        break;
-        
-      case B_UP:     // Up arrow - X axis forward movement
-        if (!esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-          float currentPos = esp32Motion.getPosition(0); // X-axis is index 0
-          float targetPos = currentPos + manualStepSize;
-          if (esp32Motion.isPositionSafe(0, targetPos)) {
-            esp32Motion.setTargetPosition(0, targetPos);
-            nextionDisplay.showMessage("X↑ " + String(manualStepSize) + "mm");
-          } else {
-            nextionDisplay.showMessage("X limit reached");
-          }
-        } else if (esp32Motion.getEmergencyStop()) {
-          nextionDisplay.showMessage("E-STOP - Press ESC");
-        } else {
-          nextionDisplay.showMessage("TEST RUNNING");
-        }
-        break;
-        
-      case B_DOWN:   // Down arrow - X axis backward movement
-        if (!esp32Motion.getEmergencyStop() && !esp32Motion.isTestSequenceActive()) {
-          float currentPos = esp32Motion.getPosition(0); // X-axis is index 0
-          float targetPos = currentPos - manualStepSize;
-          if (esp32Motion.isPositionSafe(0, targetPos)) {
-            esp32Motion.setTargetPosition(0, targetPos);
-            nextionDisplay.showMessage("X↓ " + String(manualStepSize) + "mm");
-          } else {
-            nextionDisplay.showMessage("X limit reached");
-          }
-        } else if (esp32Motion.getEmergencyStop()) {
-          nextionDisplay.showMessage("E-STOP - Press ESC");
-        } else {
-          nextionDisplay.showMessage("TEST RUNNING");
-        }
-        break;
-        
+      // Arrow keys are handled before the switch statement
       case B_STEP:   // Tilda - Change manual step size
-        if (manualStepSize == 0.01) {
+        if (abs(manualStepSize - 0.01) < 0.001) {
           manualStepSize = 0.1;
-        } else if (manualStepSize == 0.1) {
+        } else if (abs(manualStepSize - 0.1) < 0.001) {
           manualStepSize = 1.0;
-        } else if (manualStepSize == 1.0) {
+        } else if (abs(manualStepSize - 1.0) < 0.001) {
           manualStepSize = 10.0;
         } else {
-          manualStepSize = 0.01;
+          manualStepSize = 0.01;  // Reset to start
         }
-        nextionDisplay.showMessage("Step: " + String(manualStepSize) + "mm");
+        nextionDisplay.showMessage("Step " + String(manualStepSize, 2) + "mm");
         break;
         
       case B_X_ENA:  // c - Enable/disable X axis (works even during emergency stop)
+        nextionDisplay.showMessage("X_ENA key pressed");
         if (!esp32Motion.isTestSequenceActive()) {
           if (esp32Motion.isAxisEnabled(0)) {
             esp32Motion.disableAxis(0);
@@ -381,6 +388,7 @@ void handleKeyboard() {
         break;
         
       case B_Z_ENA:  // q - Enable/disable Z axis (works even during emergency stop)
+        nextionDisplay.showMessage("Z_ENA key pressed");
         if (!esp32Motion.isTestSequenceActive()) {
           if (esp32Motion.isAxisEnabled(1)) {
             esp32Motion.disableAxis(1);
@@ -408,7 +416,7 @@ void handleKeyboard() {
         }
         break;
         
-      case B_DISPL:  // Win - Display status and diagnostics
+      case B_DISPL: { // Win - Display status and diagnostics
         esp32Motion.printDiagnostics();
         Serial.println("Test sequence status: " + esp32Motion.getTestSequenceStatus());
         Serial.printf("Manual step size: %.3f mm\n", manualStepSize);
@@ -416,15 +424,43 @@ void handleKeyboard() {
                      esp32Motion.isAxisEnabled(0) ? "ENABLED" : "DISABLED");
         Serial.printf("Z-axis: %.3f mm (%s)\n", esp32Motion.getPosition(1), 
                      esp32Motion.isAxisEnabled(1) ? "ENABLED" : "DISABLED");
+        
+        // Show ISR and pulse diagnostics - what we REALLY need to know
+        uint32_t isrExecutions = esp32Motion.isrCount;
+        uint32_t xPulses = esp32Motion.stepsPulsed[0];
+        uint32_t zPulses = esp32Motion.stepsPulsed[1];
+        
+        // Calculate ISR rate (should be ~2000Hz)
+        static uint32_t lastIsrCount = 0;
+        static uint32_t lastCheckTime = 0;
+        uint32_t currentTime = millis();
+        uint32_t isrRate = 0;
+        if (currentTime - lastCheckTime >= 1000) {  // Calculate every second
+          isrRate = isrExecutions - lastIsrCount;
+          lastIsrCount = isrExecutions;
+          lastCheckTime = currentTime;
+        }
+        
+        Serial1.print("t3.txt=\"V" + String(esp32Motion.versionMajor) + " ISR:" + String(isrExecutions) + 
+                      " XP:" + String(xPulses) + " ZP:" + String(zPulses) + "\"");
+        Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
         break;
+      }
         
       default:
         // Unknown key - show step size as feedback
         nextionDisplay.showMessage("Step: " + String(manualStepSize) + "mm");
         break;
     }
-  }
 }
+
+// Wrapper function for compatibility
+void handleKeyboard() {
+  processKeypadEvent();
+}
+
+// Note: Enhanced keyboard processing via processKeypadEvent() 
+// is now integrated with the existing scheduler system
 
 void checkEmergencyStop() {
   // Legacy function - now handled by state machine
@@ -466,6 +502,20 @@ void taskKeyboardScan() {
 void taskMotionUpdate() {
   // Motion control update - runs at 200Hz (5ms)
   esp32Motion.update();
+  
+  // Only update target positions when they change (not every loop!)
+  static float lastTargetX = 0.0;
+  static float lastTargetZ = 0.0;
+  
+  if (targetPositionX != lastTargetX) {
+    esp32Motion.setTargetPosition(0, targetPositionX);  // X-axis
+    lastTargetX = targetPositionX;
+  }
+  
+  if (targetPositionZ != lastTargetZ) {
+    esp32Motion.setTargetPosition(1, targetPositionZ);  // Z-axis
+    lastTargetZ = targetPositionZ;
+  }
 }
 
 void taskDisplayUpdate() {
