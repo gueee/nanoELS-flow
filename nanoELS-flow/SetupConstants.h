@@ -154,6 +154,7 @@ extern const float PULSE_PER_REVOLUTION;  // MPG pulses per revolution (100 PPR 
 extern const int MPG_PCNT_FILTER;         // Encoder filter value (1-1023 clock cycles)
 extern const int MPG_PCNT_LIM;            // PCNT limit for overflow detection
 extern const int MPG_PCNT_CLEAR;          // Reset PCNT when reaching this value
+extern const float MPG_SCALE_DIVISOR;     // How many pulses equals one full step size movement
 
 // Motion control limits (converted to our system internally)
 extern const float MAX_VELOCITY_X_USER;    // Maximum X velocity in mm/s

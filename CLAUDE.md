@@ -197,9 +197,11 @@ The system supports two WiFi modes:
 - Nextion display with direct Serial1 communication
 - PS2 keyboard interface with full key mapping
 - Web interface with HTTP and WebSocket support
+- **MPG Support**: Manual Pulse Generators for both X and Z axes with automatic initialization
 
 **🔧 Current Functionality**:
 - **Manual Mode**: Arrow keys directly update target positions with h5.ino algorithms
+- **MPG Control**: Hardware pulse counters (PCNT_UNIT_1, PCNT_UNIT_2) for handwheel input
 - **Emergency Stop**: Immediate response integrated throughout motion system
 - **Threading Mode**: Professional precision using proven h5.ino positionFromSpindle() calculations
 - **Display**: Real-time status and position updates
@@ -271,8 +273,9 @@ Required libraries (install via Arduino IDE Library Manager):
 - **h5.ino Algorithms**: Proven backlash compensation and position tracking
 - **NO External Libraries**: No FastAccelStepper or other motion libraries
 - **Direct Position Updates**: Immediate position changes like h5.ino (no queues)
-- **Hardware PCNT**: ESP32 Pulse Counter for precise encoder tracking
+- **Hardware PCNT**: ESP32 Pulse Counter for precise encoder tracking (PCNT_UNIT_0=spindle, PCNT_UNIT_1=Z-MPG, PCNT_UNIT_2=X-MPG)
 - **Sub-micrometer Precision**: 0.0007mm following error with 600 PPR encoder
+- **MPG Integration**: Manual pulse generators use spindle-style instant following
 - **Emergency Stop Priority**: Highest priority safety system
 
 ### Code Architecture Rules
@@ -309,8 +312,12 @@ Required libraries (install via Arduino IDE Library Manager):
 - B_STEP (86): Tilda (~) - cycle step size (0.01/0.1/1.0/10.0mm)
 - B_X_ENA (67): c - Enable/disable X axis
 - B_Z_ENA (113): q - Enable/disable Z axis
+- B_MEASURE (66): m - Toggle X-axis MPG (Manual Pulse Generator)
+- B_REVERSE (148): r - Toggle Z-axis MPG (Manual Pulse Generator)
 
 **Critical Safety Note**: B_OFF (ESC key) toggles emergency stop - press once to activate, press again to clear.
+
+**MPG Note**: MPGs are automatically enabled on startup with 1mm step size. Keys m/r can toggle them on/off.
 
 ### User Interface and Feedback
 - **Primary Interface**: Nextion display provides all user feedback and status information

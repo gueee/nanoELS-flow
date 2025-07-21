@@ -525,8 +525,9 @@ void MinimalMotionControl::updateMPGTracking() {
         
         MinimalAxis& a = axes[axis];
         
-        // h5.ino exact formula: pulseDelta / PULSE_PER_REVOLUTION * motorSteps + fractionalPos
-        float fractionalDelta = (float)pulseDelta / PULSE_PER_REVOLUTION * a.motorSteps + mpg[axis].fractionalPos;
+        // Convert MPG pulses to motor steps using configured step size
+        // Each MPG pulse = stepSize movement in deci-microns
+        float fractionalDelta = (float)pulseDelta * mpg[axis].stepSize / a.screwPitch * a.motorSteps / MPG_SCALE_DIVISOR + mpg[axis].fractionalPos;
         int32_t deltaSteps = round(fractionalDelta);
         
         // h5.ino fractional accumulation - don't lose fractional steps

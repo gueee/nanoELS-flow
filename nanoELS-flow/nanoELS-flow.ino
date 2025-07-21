@@ -167,6 +167,13 @@ void setup() {
     Serial.println("✗ Motion control initialization failed");
   }
   
+  // Enable MPGs automatically on startup
+  motionControl.enableMPG(AXIS_X, true);
+  motionControl.setMPGStepSize(AXIS_X, 10000); // 1mm default step size
+  motionControl.enableMPG(AXIS_Z, true);
+  motionControl.setMPGStepSize(AXIS_Z, 10000); // 1mm default step size
+  Serial.println("✓ MPGs enabled for both axes (1mm step size)");
+  
   Serial.println("Setup complete - SAFETY READY");
   Serial.println("======================================");
   Serial.println("HARDWARE CONFIGURATION:");
@@ -380,14 +387,10 @@ void processKeypadEvent() {
         
         statusInfo.currentStepSize = manualStepSize;
         
-        // Update MPG step sizes if MPG is active
+        // Update MPG step sizes (MPGs are always active)
         int32_t stepSizeDU = (int32_t)(manualStepSize * 10000); // Convert mm to deci-microns
-        if (motionControl.isMPGEnabled(AXIS_X)) {
-          motionControl.setMPGStepSize(AXIS_X, stepSizeDU);
-        }
-        if (motionControl.isMPGEnabled(AXIS_Z)) {
-          motionControl.setMPGStepSize(AXIS_Z, stepSizeDU);
-        }
+        motionControl.setMPGStepSize(AXIS_X, stepSizeDU);
+        motionControl.setMPGStepSize(AXIS_Z, stepSizeDU);
         
         nextionDisplay.showMessage("Step " + String(manualStepSize, 2) + "mm");
         Serial.printf("Step size changed to: %.3f mm\n", manualStepSize);
@@ -428,35 +431,14 @@ void processKeypadEvent() {
       }
       break;
     
-    // MPG (Manual Pulse Generator) Controls
-    case B_MEASURE: // m - Toggle MPG mode for X axis
-      if (!motionControl.getEmergencyStop()) {
-        if (motionControl.isMPGEnabled(AXIS_X)) {
-          motionControl.enableMPG(AXIS_X, false);
-          nextionDisplay.showMessage("X MPG OFF");
-          Serial.println("X-axis MPG disabled");
-        } else {
-          motionControl.enableMPG(AXIS_X, true);
-          motionControl.setMPGStepSize(AXIS_X, (int32_t)(manualStepSize * 10000)); // Convert mm to deci-microns
-          nextionDisplay.showMessage("X MPG ON");
-          Serial.printf("X-axis MPG enabled, step: %.3f mm\n", manualStepSize);
-        }
-      }
+    case B_MEASURE: // m - Cycle measurement units (metric/inch/TPI)
+      // TODO: Implement unit switching
+      nextionDisplay.showMessage("Units: Metric");
       break;
       
-    case B_REVERSE: // r - Toggle MPG mode for Z axis
-      if (!motionControl.getEmergencyStop()) {
-        if (motionControl.isMPGEnabled(AXIS_Z)) {
-          motionControl.enableMPG(AXIS_Z, false);
-          nextionDisplay.showMessage("Z MPG OFF");
-          Serial.println("Z-axis MPG disabled");
-        } else {
-          motionControl.enableMPG(AXIS_Z, true);
-          motionControl.setMPGStepSize(AXIS_Z, (int32_t)(manualStepSize * 10000)); // Convert mm to deci-microns
-          nextionDisplay.showMessage("Z MPG ON");
-          Serial.printf("Z-axis MPG enabled, step: %.3f mm\n", manualStepSize);
-        }
-      }
+    case B_REVERSE: // r - Reverse direction (left-hand threads)
+      // TODO: Implement direction reversal
+      nextionDisplay.showMessage("Direction: Normal");
       break;
         
     case B_DISPL: { // Win - Show diagnostics
@@ -466,14 +448,12 @@ void processKeypadEvent() {
       // Always print diagnostics to Serial
       motionControl.printDiagnostics();
       Serial.printf("Manual step size: %.3f mm\n", manualStepSize);
-      Serial.printf("X-axis: %.3f mm (%s) MPG: %s\n", 
+      Serial.printf("X-axis: %.3f mm (%s)\n", 
                    motionControl.stepsToMM(AXIS_X, motionControl.getPosition(AXIS_X)), 
-                   motionControl.isAxisEnabled(AXIS_X) ? "ENABLED" : "DISABLED",
-                   motionControl.isMPGEnabled(AXIS_X) ? "ON" : "OFF");
-      Serial.printf("Z-axis: %.3f mm (%s) MPG: %s\n", 
+                   motionControl.isAxisEnabled(AXIS_X) ? "ENABLED" : "DISABLED");
+      Serial.printf("Z-axis: %.3f mm (%s)\n", 
                    motionControl.stepsToMM(AXIS_Z, motionControl.getPosition(AXIS_Z)), 
-                   motionControl.isAxisEnabled(AXIS_Z) ? "ENABLED" : "DISABLED",
-                   motionControl.isMPGEnabled(AXIS_Z) ? "ON" : "OFF");
+                   motionControl.isAxisEnabled(AXIS_Z) ? "ENABLED" : "DISABLED");
       
       if (showDiagnostics) {
         // Show status on display

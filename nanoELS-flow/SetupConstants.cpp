@@ -11,8 +11,8 @@ const int ENCODER_BACKLASH = 3;    // Number of pulses encoder can issue without
 
 // WiFi Configuration
 const bool WIFI_ENABLED = true;
-const char* HOME_WIFI_SSID = "Holzweg_131";           // Your WiFi network name
-const char* HOME_WIFI_PASSWORD = "Holzweg131-mesh";   // Your WiFi password
+const char* HOME_WIFI_SSID = "your-wifi-name";           // Your WiFi network name
+const char* HOME_WIFI_PASSWORD = "your-password";   // Your WiFi password
 
 // Main lead screw (Z-axis) parameters
 const long SCREW_Z_DU = 50000;           // Lead screw pitch in deci-microns (5mm = 50000 du)
@@ -49,6 +49,11 @@ const float PULSE_PER_REVOLUTION = 400.0; // MPG pulses per revolution (100 PPR 
 const int MPG_PCNT_FILTER = 10;         // Encoder filter value (1-1023 clock cycles)
 const int MPG_PCNT_LIM = 31000;         // PCNT limit for overflow detection
 const int MPG_PCNT_CLEAR = 30000;       // Reset PCNT when reaching this value
+
+// MPG scaling - controls sensitivity of handwheel movement
+// Lower values = more movement per click
+// Examples: 16 = stepSize/4 per click, 8 = stepSize/2 per click, 32 = stepSize/8 per click
+const float MPG_SCALE_DIVISOR = 16.0;   // 16 pulses = 1 full step size (4 clicks since 1 click = 4 pulses)
 
 // Motion control limits (converted to our system internally)
 const float MAX_VELOCITY_X_USER = 200.0;  // Maximum X velocity in mm/s (increased for manual jogging)
