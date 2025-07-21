@@ -499,6 +499,11 @@ int32_t MinimalMotionControl::getMPGDelta(int axis) {
     
     if (delta == 0) return 0;
     
+    // Apply inversion if configured (similar to stepper inversion)
+    if ((axis == AXIS_Z && INVERT_MPG_Z) || (axis == AXIS_X && INVERT_MPG_X)) {
+        delta = -delta;
+    }
+    
     // Debug output for non-zero deltas
     Serial.printf("MPG[%d] delta=%d (count=%d, last=%d)\n", axis, delta, count, mpg[axis].lastCount);
     

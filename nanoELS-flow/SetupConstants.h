@@ -145,6 +145,10 @@ extern const bool NEEDS_REST_X;         // Set false for closed-loop drivers
 extern const long MAX_TRAVEL_MM_X;      // Maximum X travel in mm
 extern const long BACKLASH_DU_X;        // Backlash compensation in deci-microns
 
+// MPG inversion settings
+extern const bool INVERT_MPG_Z;         // Invert MPG direction for Z axis
+extern const bool INVERT_MPG_X;         // Invert MPG direction for X axis
+
 // Manual stepping configuration
 extern const long STEP_TIME_MS;           // Time for one manual step in milliseconds
 extern const long DELAY_BETWEEN_STEPS_MS; // Pause between manual steps in milliseconds

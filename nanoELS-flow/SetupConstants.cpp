@@ -46,6 +46,8 @@ const long DELAY_BETWEEN_STEPS_MS = 80;  // Pause between manual steps in millis
 
 // MPG (Manual Pulse Generator) configuration - h5.ino style
 const float PULSE_PER_REVOLUTION = 400.0; // MPG pulses per revolution (100 PPR encoder = 400 quadrature counts)
+const bool INVERT_MPG_Z = true;        // Invert MPG direction for Z axis
+const bool INVERT_MPG_X = true;        // Invert MPG direction for X axis
 const int MPG_PCNT_FILTER = 10;         // Encoder filter value (1-1023 clock cycles)
 const int MPG_PCNT_LIM = 31000;         // PCNT limit for overflow detection
 const int MPG_PCNT_CLEAR = 30000;       // Reset PCNT when reaching this value
