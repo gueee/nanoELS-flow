@@ -36,9 +36,12 @@ enum OperationMode {
 // Operation state
 enum OperationState {
     STATE_IDLE,             // No operation active
+    STATE_DIRECTION_SETUP,  // Setting operation direction (internal/external, left-to-right)
     STATE_TOUCHOFF_X,       // Setting X touch-off coordinate
     STATE_TOUCHOFF_Z,       // Setting Z touch-off coordinate
-    STATE_SETUP_LENGTH,     // Setting cut length/depth
+    STATE_PARKING_SETUP,    // Setting parking position
+    STATE_TARGET_DIAMETER,  // Setting target diameter via numpad
+    STATE_TARGET_LENGTH,    // Setting target length via numpad
     STATE_SETUP_PASSES,     // Setting number of passes
     STATE_SETUP_CONE,       // Setting cone ratio (thread mode only)
     STATE_READY,            // Ready to start operation
@@ -67,9 +70,10 @@ private:
     OperationState currentState;
     PassSubState passSubState;
     
+    // h5.ino-style setup progression
+    int setupIndex;                    // Current setup step index (0, 1, 2, 3...)
+    
     // Touch-off coordinates (user-defined reference points)
-    long touchOffX;     // X touch-off position in steps
-    long touchOffZ;     // Z touch-off position in steps
     float touchOffXCoord;  // X coordinate value (diameter in mm)
     float touchOffZCoord;  // Z coordinate value (position in mm)
     bool touchOffXValid;
@@ -82,15 +86,36 @@ private:
     int currentMeasure;    // Current measurement unit (MEASURE_METRIC/INCH/TPI)
     int touchOffAxis;      // 0=X, 1=Z
     
-    // Operation parameters (offsets from touch-off)
+    // Arrow key mode control for safety
+    enum ArrowKeyMode {
+        ARROW_MOTION_MODE,      // Normal mode - arrows control axes movement
+        ARROW_NAVIGATION_MODE   // Setup mode - arrows navigate options
+    };
+    ArrowKeyMode arrowKeyMode;
+    
+    // Direction control for turning operations
+    bool isInternalOperation;   // false = external, true = internal (affects X logic)
+    bool isLeftToRight;        // false = right-to-left, true = left-to-right (affects Z logic)
+    
+    // Single touch-off point storage
+    long touchOffX;            // Touch-off X position in steps
+    long touchOffZ;            // Touch-off Z position in steps
+    bool touchOffComplete;     // Whether touch-off has been performed
+    
+    // User-set parking position storage (no compensation - just store position)
+    long parkingPositionX;     // User-set X parking position in steps
+    long parkingPositionZ;     // User-set Z parking position in steps
+    bool parkingPositionSet;   // Whether parking position has been stored
+    
+    // Target values entered via numpad
+    long targetDiameter;       // Final diameter target in deci-microns
+    long targetZLength;        // Cut length target in deci-microns
+    
+    // Operation parameters (calculated from targets and touch-off)
     long cutLength;     // Z-axis cut length in steps (turning/threading)
     long cutDepth;      // X-axis cut depth in steps (all operations)
     int numPasses;      // Number of passes for the operation
     float coneRatio;    // Cone ratio for threading (X movement per Z movement)
-    
-    // Parking positions (safe positions for tool changes)
-    long parkingOffsetX;  // X offset from workpiece for parking (in steps)
-    long parkingOffsetZ;  // Z offset from workpiece for parking (in steps)
     
     // Current pass tracking
     int currentPass;
@@ -108,6 +133,8 @@ private:
     // Convert between units
     long mmToSteps(float mm, int axis);
     float stepsToMm(long steps, int axis) const;
+    
+    // h5.ino-style setup progression helpers (moved to public section)
     
     // Spindle synchronization (h5.ino style)
     long posFromSpindle(int axis, long spindlePos, bool respectLimits);
@@ -131,6 +158,17 @@ private:
     bool retractTool();
     bool returnToStart();
     
+    // New workflow helper methods
+    void processDirectionSetup();       // Handle direction setup state
+    void processTouchOffSetup();        // Handle touch-off state
+    void processParkingSetup();         // Handle parking setup state
+    void processTargetEntry();          // Handle target entry states
+    void calculateOperationParameters(); // Calculate cut parameters from targets
+    String getDirectionDisplayText();   // Get direction display text (≤21 chars)
+    String getTouchOffDisplayText();    // Get touch-off display text (≤21 chars)
+    String getParkingDisplayText();     // Get parking display text (≤21 chars)
+    String getTargetDisplayText();      // Get target entry display text (≤21 chars)
+    
 public:
     OperationManager();
     void init(MinimalMotionControl* mc);
@@ -140,6 +178,14 @@ public:
     OperationMode getMode() const { return currentMode; }
     OperationState getState() const { return currentState; }
     
+    // Direction control (internal/external and left-to-right/right-to-left)
+    void setInternalOperation(bool internal) { isInternalOperation = internal; }
+    void setLeftToRight(bool leftToRight) { isLeftToRight = leftToRight; }
+    bool getInternalOperation() const { return isInternalOperation; }
+    bool getLeftToRight() const { return isLeftToRight; }
+    void toggleInternalExternal() { isInternalOperation = !isInternalOperation; }
+    void toggleDirection() { isLeftToRight = !isLeftToRight; }
+    
     // Touch-off management
     void startTouchOffX();  // Start X touch-off process
     void startTouchOffZ();  // Start Z touch-off process
@@ -147,6 +193,30 @@ public:
     bool hasTouchOffX() const { return touchOffXValid; }
     bool hasTouchOffZ() const { return touchOffZValid; }
     bool hasTouchOff() const { return touchOffXValid && touchOffZValid; }
+    
+    // Parking position management (variable parking system)
+    void startParkingSetup();           // Enter parking position setup mode
+    void confirmParkingPosition();      // Store current position as parking
+    void clearParkingPosition();        // Clear stored parking position
+    bool hasParkingPosition() const { return parkingPositionSet; }
+    void moveToParkingPosition();       // Move to stored parking position
+    
+    // Target value management (numpad entry for targets)
+    void startTargetDiameterEntry();    // Start diameter target entry
+    void startTargetLengthEntry();      // Start length target entry
+    void confirmTargetValue();          // Confirm numpad-entered target
+    bool hasTargetDiameter() const { return targetDiameter > 0; }
+    bool hasTargetLength() const { return targetZLength > 0; }
+    void clearTargets();                // Clear target values
+    
+    // Arrow key mode control for safety
+    void setArrowKeyMode(ArrowKeyMode mode) { arrowKeyMode = mode; }
+    ArrowKeyMode getArrowKeyMode() const { return arrowKeyMode; }
+    bool isArrowMotionEnabled() const { return arrowKeyMode == ARROW_MOTION_MODE; }
+    
+    // Clear/cancel functionality
+    void clearCurrentInput();           // Clear current numpad/state
+    void cancelOperation();             // Cancel and return to idle
     
     // h5.ino-style numpad functions
     void numpadPress(int digit);           // Add digit to numpad (0-9)
@@ -180,10 +250,6 @@ public:
     void setNumPassesFromNumpad();   // Set passes from current numpad value
     void setConeRatioFromNumpad();   // Set cone ratio from current numpad value
     
-    // Parking position setup
-    void setParkingOffsetX(float mm);
-    void setParkingOffsetZ(float mm);
-    
     // Operation control
     bool startOperation();    // Start the current operation
     void stopOperation();     // Stop and reset
@@ -194,6 +260,15 @@ public:
     // Setup state machine
     void nextSetupStep();     // Advance setup state
     void previousSetupStep(); // Go back in setup
+    
+    // h5.ino-style setup progression
+    int getSetupIndex() const { return setupIndex; }
+    void resetSetupIndex() { setupIndex = 0; }  // Reset to first setup step
+    void advanceSetupIndex();  // Move to next setup step
+    bool isSetupComplete() const;  // Check if all setup steps complete
+    int getLastSetupIndex() const;     // Get final setup index for current mode
+    bool isPassMode() const;           // Check if mode uses passes
+    bool needsZStops() const;          // Check if mode needs Z-axis stops
     
     // Main update function (call from loop)
     void update();

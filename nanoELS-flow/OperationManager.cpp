@@ -10,8 +10,7 @@ OperationManager::OperationManager()
     , currentMode(MODE_NORMAL)
     , currentState(STATE_IDLE)
     , passSubState(SUBSTATE_MOVE_TO_START)
-    , touchOffX(0)
-    , touchOffZ(0)
+    , setupIndex(0)
     , touchOffXCoord(0.0f)
     , touchOffZCoord(0.0f)
     , touchOffXValid(false)
@@ -20,12 +19,21 @@ OperationManager::OperationManager()
     , numpadIndex(0)
     , currentMeasure(MEASURE_METRIC)
     , touchOffAxis(0)
+    , arrowKeyMode(ARROW_MOTION_MODE)
+    , isInternalOperation(false)
+    , isLeftToRight(true)
+    , touchOffX(0)
+    , touchOffZ(0)
+    , touchOffComplete(false)
+    , parkingPositionX(0)
+    , parkingPositionZ(0)
+    , parkingPositionSet(false)
+    , targetDiameter(0)
+    , targetZLength(0)
     , cutLength(0)
     , cutDepth(0)
     , numPasses(1)
     , coneRatio(0.0f)
-    , parkingOffsetX(20000)  // 2mm default
-    , parkingOffsetZ(50000)  // 5mm default
     , currentPass(0)
     , passDepth(0)
     , opDuprSign(1)
@@ -261,6 +269,7 @@ void OperationManager::setMode(OperationMode mode) {
     
     currentMode = mode;
     currentState = STATE_IDLE;
+    setupIndex = 0;  // h5.ino-style: reset to first setup step
     
     // Reset parameters for new mode
     currentPass = 0;
@@ -332,18 +341,38 @@ void OperationManager::confirmTouchOffValue() {
         touchOffXCoord = value;  // Store as diameter
         touchOffXValid = true;
         resetNumpad();
-        currentState = STATE_IDLE;
+        inNumpadInput = false;
+        
+        // Check if we have both touch-offs complete
+        if (touchOffZValid) {
+            // Both complete, advance to next setup based on mode
+            currentState = STATE_IDLE;
+            nextSetupStep(); // Now works because we're in STATE_IDLE with complete touch-offs
+        } else {
+            // Still need Z touch-off
+            currentState = STATE_IDLE;
+        }
     } else if (currentState == STATE_TOUCHOFF_Z) {
         touchOffZCoord = value;  // Store as position
         touchOffZValid = true;
         resetNumpad();
-        currentState = STATE_IDLE;
+        inNumpadInput = false;
+        
+        // Check if we have both touch-offs complete
+        if (touchOffXValid) {
+            // Both complete, advance to next setup based on mode
+            currentState = STATE_IDLE;
+            nextSetupStep(); // Now works because we're in STATE_IDLE with complete touch-offs
+        } else {
+            // Still need X touch-off
+            currentState = STATE_IDLE;
+        }
     }
 }
 
 // h5.ino-style parameter entry functions
 void OperationManager::startParameterEntry(OperationState parameterState) {
-    if (parameterState == STATE_SETUP_LENGTH || parameterState == STATE_SETUP_PASSES || 
+    if (parameterState == STATE_TARGET_LENGTH || parameterState == STATE_SETUP_PASSES || 
         parameterState == STATE_SETUP_CONE) {
         currentState = parameterState;
         resetNumpad();
@@ -355,7 +384,7 @@ void OperationManager::confirmParameterValue() {
     if (!inNumpadInput || numpadIndex == 0) return;
     
     switch (currentState) {
-        case STATE_SETUP_LENGTH:
+        case STATE_TARGET_LENGTH:
             if (currentMode == MODE_FACE) {
                 setCutDepthFromNumpad();
             } else {
@@ -380,7 +409,7 @@ void OperationManager::confirmParameterValue() {
 }
 
 bool OperationManager::isInParameterEntry() const {
-    return inNumpadInput && (currentState == STATE_SETUP_LENGTH || 
+    return inNumpadInput && (currentState == STATE_TARGET_LENGTH || 
                            currentState == STATE_SETUP_PASSES || 
                            currentState == STATE_SETUP_CONE);
 }
@@ -425,22 +454,13 @@ void OperationManager::setConeRatio(float ratio) {
     coneRatio = ratio;
 }
 
-void OperationManager::setParkingOffsetX(float mm) {
-    parkingOffsetX = mmToSteps(mm, AXIS_X);
-}
-
-void OperationManager::setParkingOffsetZ(float mm) {
-    parkingOffsetZ = mmToSteps(mm, AXIS_Z);
-}
 
 void OperationManager::nextSetupStep() {
-    // Skip touch-off states when advancing
-    if (currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
-        return;
-    }
+    // Touch-off states handle their own progression in confirmTouchOffValue()
+    // Don't skip them here, let them advance properly
     
     // If in parameter entry, just return - parameters advance setup automatically
-    if (inNumpadInput && (currentState == STATE_SETUP_LENGTH || 
+    if (inNumpadInput && (currentState == STATE_TARGET_LENGTH || 
                          currentState == STATE_SETUP_PASSES || 
                          currentState == STATE_SETUP_CONE)) {
         return;
@@ -461,9 +481,9 @@ void OperationManager::nextSetupStep() {
                     if (!hasTouchOff()) {
                         return;  // Can't advance without touch-off
                     }
-                    startParameterEntry(STATE_SETUP_LENGTH);  // Start numpad entry
+                    startParameterEntry(STATE_TARGET_LENGTH);  // Start numpad entry
                     break;
-                case STATE_SETUP_LENGTH:
+                case STATE_TARGET_LENGTH:
                     startParameterEntry(STATE_SETUP_PASSES);  // Start numpad entry
                     break;
                 case STATE_SETUP_PASSES:
@@ -481,9 +501,9 @@ void OperationManager::nextSetupStep() {
                     if (!hasTouchOff()) {
                         return;  // Can't advance without touch-off
                     }
-                    startParameterEntry(STATE_SETUP_LENGTH);  // Start numpad entry
+                    startParameterEntry(STATE_TARGET_LENGTH);  // Start numpad entry
                     break;
-                case STATE_SETUP_LENGTH:
+                case STATE_TARGET_LENGTH:
                     startParameterEntry(STATE_SETUP_PASSES);  // Start numpad entry
                     break;
                 case STATE_SETUP_PASSES:
@@ -529,9 +549,9 @@ void OperationManager::previousSetupStep() {
             currentState = STATE_SETUP_PASSES;
             break;
         case STATE_SETUP_PASSES:
-            currentState = STATE_SETUP_LENGTH;
+            currentState = STATE_TARGET_LENGTH;
             break;
-        case STATE_SETUP_LENGTH:
+        case STATE_TARGET_LENGTH:
             currentState = STATE_IDLE;
             break;
         default:
@@ -612,11 +632,13 @@ bool OperationManager::moveToStartPosition() {
             break;
             
         case MODE_FACE:
-            // Start at parking offset from touch-off diameter
-            {
-                float parkingDiameter = touchOffXCoord + 2.0f * stepsToMm(parkingOffsetX, AXIS_X);
-                startX = touchOffX + mmToSteps((parkingDiameter - touchOffXCoord) / 2.0f, AXIS_X);
-                startZ = touchOffZ;  // At touch-off Z (face) position
+            // Start at parking position if set, otherwise at touch-off
+            if (parkingPositionSet) {
+                startX = parkingPositionX;
+                startZ = parkingPositionZ;
+            } else {
+                startX = touchOffX;
+                startZ = touchOffZ;
             }
             break;
             
@@ -780,8 +802,8 @@ bool OperationManager::performCuttingPass() {
 bool OperationManager::retractTool() {
     if (!motionControl) return false;
     
-    // Calculate safe retraction position
-    long safeX = touchOffX - parkingOffsetX;
+    // Move to parking position if set, otherwise retract to touch-off position
+    long safeX = parkingPositionSet ? parkingPositionX : touchOffX;
     
     motionControl->setTargetPosition(AXIS_X, safeX);
     
@@ -951,14 +973,23 @@ String OperationManager::getStatusText() {
             }
             break;
             
+        case STATE_DIRECTION_SETUP:
+            return "Direction";  // 9 chars
+            
         case STATE_TOUCHOFF_X:
             return "Touch X";
             
         case STATE_TOUCHOFF_Z:
             return "Touch Z";
             
-        case STATE_SETUP_LENGTH:
-            return currentMode == MODE_FACE ? "Set depth" : "Set length";
+        case STATE_PARKING_SETUP:
+            return "Parking";  // 7 chars
+            
+        case STATE_TARGET_DIAMETER:
+            return "Target Ø";  // 8 chars
+            
+        case STATE_TARGET_LENGTH:
+            return "Target L";  // 8 chars
             
         case STATE_SETUP_PASSES:
             return "Set passes";
@@ -996,78 +1027,77 @@ String OperationManager::getStatusText() {
 }
 
 String OperationManager::getPromptText() {
-    switch (currentState) {
-        case STATE_IDLE:
-            if (!touchOffXValid && !touchOffZValid) {
-                return "Touch off X and Z";
-            } else if (!touchOffXValid) {
-                return "Touch off X axis";
-            } else if (!touchOffZValid) {
-                return "Touch off Z axis";
-            }
-            return "";
-            
-        case STATE_TOUCHOFF_X:
-            if (inNumpadInput && numpadIndex > 0) {
-                return "Use " + getNumpadDisplayText() + "?";
-            } else {
-                return "Enter X diameter";
-            }
-            
-        case STATE_TOUCHOFF_Z:
-            if (inNumpadInput && numpadIndex > 0) {
-                return "Use " + getNumpadDisplayText() + "?";
-            } else {
-                return "Enter Z position";
-            }
-            
-        case STATE_SETUP_LENGTH:
-            if (inNumpadInput && numpadIndex > 0) {
-                return "Use " + getNumpadDisplayText() + "?";
-            } else if (inNumpadInput) {
-                return currentMode == MODE_FACE ? "Enter depth" : "Enter length";
-            } else if (currentMode == MODE_FACE) {
-                return "Depth: " + String(stepsToMm(cutDepth, AXIS_Z), 2) + "mm";
-            } else {
-                return "Length: " + String(stepsToMm(cutLength, AXIS_Z), 2) + "mm";
-            }
-            
-        case STATE_SETUP_PASSES:
+    // h5.ino-style setupIndex-based prompts (similar to h5.ino lines 1640-1683)
+    if (isPassMode()) {
+        // setupIndex 0: Direction and type selection
+        if (setupIndex == 0) {
+            String direction = isLeftToRight ? "L→R" : "R→L";
+            String type = isInternalOperation ? "INT" : "EXT";
+            return direction + " " + type + " ←→↑↓";
+        }
+        
+        bool missingZStops = needsZStops() && !touchOffZValid;
+        bool missingStops = missingZStops || !touchOffXValid;
+        
+        // setupIndex 1: Touch off confirmation (use stop keys w/s/d/a)
+        if (setupIndex == 1) {
+            return "Touch off diameter & face (w/s/d/a)";
+        }
+        // setupIndex 2: Target input confirmation (use stop keys)  
+        else if (setupIndex == 2) {
+            return "Input target Ø & length (w/s/d/a)";
+        }
+        // setupIndex 3: Number of passes
+        else if (setupIndex == 3) {
             if (inNumpadInput && numpadIndex > 0) {
                 long passes = getNumpadResult();
-                return "Use " + String(passes) + " passes?";
-            } else if (inNumpadInput) {
-                return "Enter number of passes";
+                return String(passes) + (passes == 1 ? " pass?" : " passes?");
             } else {
-                return "Passes: " + String(numPasses);
+                return String(numPasses) + " passes (numpad/↑↓)";
             }
-            
-        case STATE_SETUP_CONE:
+        }
+        // Final setup steps for threading
+        else if (currentMode == MODE_THREAD && setupIndex == 4) {
             if (inNumpadInput && numpadIndex > 0) {
-                float ratio = getNumpadResult() / 10000.0f;
-                return "Use ratio " + String(ratio, 4) + "?";
-            } else if (inNumpadInput) {
-                return "Enter cone ratio";
+                float ratio = getNumpadResult() / 100000.0f;
+                return "Cone ratio " + String(ratio, 5) + "?";
             } else {
-                return "Ratio: " + String(coneRatio, 4);
+                return "Cone ratio 0?";
             }
-            
-        case STATE_READY:
-            {
-                String prompt = "Press ON to start";
-                if (cutLength != 0 || cutDepth != 0) {
-                    prompt = "L:" + String(stepsToMm(cutLength, AXIS_Z), 1) + 
-                             " D:" + String(stepsToMm(cutDepth, AXIS_X), 1);
-                    if (numPasses > 1) {
-                        prompt += " P:" + String(numPasses);
-                    }
-                }
-                return prompt;
-            }
-            
-        default:
-            return "";
+        }
+        // Ready to start
+        else if (setupIndex >= getLastSetupIndex()) {
+            return "Ready? Press ENTER";
+        }
+    } else if (currentMode == MODE_CONE) {
+        if (inNumpadInput && numpadIndex > 0 && setupIndex == 1) {
+            float ratio = getNumpadResult() / 100000.0f;
+            return "Use ratio " + String(ratio, 5) + "?";
+        } else if (setupIndex == 1) {
+            return "Use ratio " + String(coneRatio, 5) + "?";
+        } else if (setupIndex == 2) {
+            return isInternalOperation ? "Internal?" : "External?";
+        } else if (setupIndex >= getLastSetupIndex()) {
+            return "Go?";
+        }
     }
+    
+    // Handle numpad input for parameter setup
+    if (inNumpadInput && numpadIndex > 0) {
+        long result = getNumpadResult();
+        return "Use " + formatDeciMicrons(result * (currentMeasure == MEASURE_METRIC ? 10 : 254), 5) + "?";
+    }
+    
+    // Fallback to state-based prompts for touch-off and special states
+    if (currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
+        return getTouchOffDisplayText();
+    } else if (currentState == STATE_PARKING_SETUP) {
+        return getParkingDisplayText();
+    } else if (currentState == STATE_TARGET_DIAMETER || currentState == STATE_TARGET_LENGTH) {
+        return getTargetDisplayText();
+    }
+    
+    return "Ready";
 }
 
 float OperationManager::getProgress() {
@@ -1111,4 +1141,258 @@ void OperationManager::executeGcodeMode() {
     // TODO: Implement G-code execution functionality
     // Requires file management and G-code parser integration
     // Should coordinate with web interface for program selection
+}
+
+// ===== NEW SIMPLIFIED VARIABLE PARKING WORKFLOW METHODS =====
+
+// Parking position management
+void OperationManager::startParkingSetup() {
+    if (currentState == STATE_IDLE || currentState == STATE_DIRECTION_SETUP || 
+        currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
+        currentState = STATE_PARKING_SETUP;
+        setArrowKeyMode(ARROW_MOTION_MODE);  // Enable motion for positioning
+    }
+}
+
+void OperationManager::confirmParkingPosition() {
+    if (currentState == STATE_PARKING_SETUP && motionControl) {
+        parkingPositionX = motionControl->getAxisPosition(AXIS_X);
+        parkingPositionZ = motionControl->getAxisPosition(AXIS_Z);
+        parkingPositionSet = true;
+        currentState = STATE_IDLE;  // Return to idle after storing
+    }
+}
+
+void OperationManager::clearParkingPosition() {
+    parkingPositionX = 0;
+    parkingPositionZ = 0;
+    parkingPositionSet = false;
+}
+
+void OperationManager::moveToParkingPosition() {
+    if (parkingPositionSet && motionControl) {
+        motionControl->setTargetPosition(AXIS_X, parkingPositionX);
+        motionControl->setTargetPosition(AXIS_Z, parkingPositionZ);
+    }
+}
+
+// Target value management
+void OperationManager::startTargetDiameterEntry() {
+    currentState = STATE_TARGET_DIAMETER;
+    setArrowKeyMode(ARROW_NAVIGATION_MODE);  // Disable motion during entry
+    resetNumpad();
+    inNumpadInput = true;
+}
+
+void OperationManager::startTargetLengthEntry() {
+    currentState = STATE_TARGET_LENGTH;
+    setArrowKeyMode(ARROW_NAVIGATION_MODE);  // Disable motion during entry
+    resetNumpad();
+    inNumpadInput = true;
+}
+
+void OperationManager::confirmTargetValue() {
+    if (!inNumpadInput || numpadIndex == 0) return;
+    
+    long deciMicrons = numpadToDeciMicrons();
+    
+    switch (currentState) {
+        case STATE_TARGET_DIAMETER:
+            targetDiameter = deciMicrons;
+            resetNumpad();
+            currentState = STATE_IDLE;
+            break;
+            
+        case STATE_TARGET_LENGTH:
+            targetZLength = deciMicrons;
+            resetNumpad();
+            currentState = STATE_IDLE;
+            break;
+            
+        default:
+            break;
+    }
+    
+    setArrowKeyMode(ARROW_MOTION_MODE);  // Re-enable motion
+}
+
+void OperationManager::clearTargets() {
+    targetDiameter = 0;
+    targetZLength = 0;
+}
+
+// Clear/cancel functionality
+void OperationManager::clearCurrentInput() {
+    resetNumpad();
+    
+    // Return to appropriate state based on current context
+    if (currentState == STATE_TARGET_DIAMETER || currentState == STATE_TARGET_LENGTH ||
+        currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z ||
+        currentState == STATE_PARKING_SETUP) {
+        currentState = STATE_IDLE;
+        setArrowKeyMode(ARROW_MOTION_MODE);
+    }
+}
+
+void OperationManager::cancelOperation() {
+    stopOperation();
+    clearCurrentInput();
+    currentState = STATE_IDLE;
+    setArrowKeyMode(ARROW_MOTION_MODE);
+}
+
+// Calculate operation parameters from targets and touch-off
+void OperationManager::calculateOperationParameters() {
+    if (!touchOffXValid || !touchOffZValid || targetDiameter == 0 || targetZLength == 0) {
+        return;
+    }
+    
+    // Convert targets to mm
+    float targetDiameterMm = targetDiameter / 10000.0f;
+    float targetLengthMm = targetZLength / 10000.0f;
+    
+    // Calculate cut parameters based on direction settings
+    if (isInternalOperation) {
+        // Internal: diameter increases, move away from centerline
+        float diameterChange = targetDiameterMm - touchOffXCoord;
+        cutDepth = mmToSteps(abs(diameterChange) / 2.0f, AXIS_X);  // Radial depth
+    } else {
+        // External: diameter decreases, move toward centerline  
+        float diameterChange = touchOffXCoord - targetDiameterMm;
+        cutDepth = mmToSteps(abs(diameterChange) / 2.0f, AXIS_X);  // Radial depth
+    }
+    
+    if (isLeftToRight) {
+        // Left to right: move in positive Z direction
+        cutLength = mmToSteps(abs(targetLengthMm - touchOffZCoord), AXIS_Z);
+    } else {
+        // Right to left: move in negative Z direction
+        cutLength = mmToSteps(abs(targetLengthMm - touchOffZCoord), AXIS_Z);
+    }
+}
+
+// Display text methods (≤21 characters as requested)
+String OperationManager::getDirectionDisplayText() {
+    String text = isInternalOperation ? "Int " : "Ext ";
+    text += isLeftToRight ? "L→R" : "R→L";
+    return text;  // Max: "Int L→R" = 7 chars, "Ext R→L" = 7 chars
+}
+
+String OperationManager::getTouchOffDisplayText() {
+    if (currentState == STATE_TOUCHOFF_X) {
+        if (inNumpadInput && numpadIndex > 0) {
+            return "X:" + getNumpadDisplayText();  // "X:" + numpad display
+        }
+        return "Touch X diameter";  // 16 chars
+    } else if (currentState == STATE_TOUCHOFF_Z) {
+        if (inNumpadInput && numpadIndex > 0) {
+            return "Z:" + getNumpadDisplayText();  // "Z:" + numpad display
+        }
+        return "Touch Z position";  // 16 chars
+    }
+    
+    // Status display
+    String status = "";
+    if (touchOffXValid) status += "X✓ ";
+    if (touchOffZValid) status += "Z✓";
+    return status.length() > 0 ? status : "Touch off X & Z";  // 15 chars
+}
+
+String OperationManager::getParkingDisplayText() {
+    if (currentState == STATE_PARKING_SETUP) {
+        return "Park: arrows+ENTER";  // 19 chars
+    }
+    return parkingPositionSet ? "Parking ✓" : "No parking";  // 9 or 10 chars
+}
+
+String OperationManager::getTargetDisplayText() {
+    if (currentState == STATE_TARGET_DIAMETER) {
+        if (inNumpadInput && numpadIndex > 0) {
+            return "Ø:" + getNumpadDisplayText();  // "Ø:" + numpad display
+        }
+        return "Target diameter";  // 15 chars
+    } else if (currentState == STATE_TARGET_LENGTH) {
+        if (inNumpadInput && numpadIndex > 0) {
+            return "L:" + getNumpadDisplayText();  // "L:" + numpad display
+        }
+        return "Target length";  // 13 chars
+    }
+    
+    // Status display
+    String status = "";
+    if (targetDiameter > 0) {
+        status += "Ø" + String(targetDiameter / 10000.0f, 1);
+        if (targetZLength > 0) status += " ";
+    }
+    if (targetZLength > 0) {
+        status += "L" + String(targetZLength / 10000.0f, 1);
+    }
+    
+    return status.length() > 0 ? status : "Set targets";  // Variable or 11 chars
+}
+
+// Workflow state processors
+void OperationManager::processDirectionSetup() {
+    // Direction is controlled via toggle methods called by key handler
+    // Arrow keys navigate between internal/external and left-to-right options
+    // This method handles any automatic advancement if needed
+}
+
+void OperationManager::processTouchOffSetup() {
+    // Touch-off is handled by startTouchOffX/Z and confirmTouchOffValue methods
+    // This method can handle any automatic state transitions
+}
+
+void OperationManager::processParkingSetup() {
+    // Parking setup is handled by arrow movement + confirmParkingPosition
+    // This method handles any automatic state management
+}
+
+void OperationManager::processTargetEntry() {
+    // Target entry is handled by numpad + confirmTargetValue methods
+    // This method handles any validation or state management
+    if (targetDiameter > 0 && targetZLength > 0 && 
+        touchOffXValid && touchOffZValid) {
+        // Auto-calculate operation parameters when we have all data
+        calculateOperationParameters();
+    }
+}
+
+// h5.ino-style setup progression functions
+int OperationManager::getLastSetupIndex() const {
+    switch (currentMode) {
+        case MODE_CONE:
+        case MODE_GCODE:
+            return 2;
+        case MODE_THREAD:
+            return 4;
+        case MODE_TURN:
+        case MODE_FACE:
+        case MODE_CUT:
+        case MODE_ELLIPSE:
+            return 3;
+        default:
+            return 0;
+    }
+}
+
+bool OperationManager::isPassMode() const {
+    return currentMode == MODE_TURN || currentMode == MODE_FACE || 
+           currentMode == MODE_CUT || currentMode == MODE_THREAD || 
+           currentMode == MODE_ELLIPSE;
+}
+
+bool OperationManager::needsZStops() const {
+    return currentMode == MODE_TURN || currentMode == MODE_FACE || 
+           currentMode == MODE_THREAD || currentMode == MODE_ELLIPSE;
+}
+
+void OperationManager::advanceSetupIndex() {
+    if (setupIndex < getLastSetupIndex()) {
+        setupIndex++;
+    }
+}
+
+bool OperationManager::isSetupComplete() const {
+    return setupIndex >= getLastSetupIndex();
 }

@@ -340,18 +340,25 @@ void processKeypadEvent() {
         nextionDisplay.setState(DISPLAY_STATE_NORMAL);
         nextionDisplay.showMessage("SYSTEM READY");
       } else {
-        // Activate emergency stop
-        emergencyKeyDetected = true;
-        motionControl.setEmergencyStop(true);
-        resetArrowKeyStates();  // Stop any movement
-        
-        // Stop any running operations
-        if (operationManager.getState() == STATE_RUNNING) {
-          operationManager.stopOperation();
-          nextionDisplay.showMessage("Operation stopped");
+        // Check if we're in setup mode - ESC goes back to setupIndex 0
+        if (operationManager.getMode() != MODE_NORMAL && !operationManager.isRunning() && operationManager.getSetupIndex() > 0) {
+          // Return to setupIndex 0 (direction selection)
+          operationManager.resetSetupIndex();
+          nextionDisplay.showMessage(operationManager.getPromptText());
+        } else {
+          // Activate emergency stop
+          emergencyKeyDetected = true;
+          motionControl.setEmergencyStop(true);
+          resetArrowKeyStates();  // Stop any movement
+          
+          // Stop any running operations
+          if (operationManager.getState() == STATE_RUNNING) {
+            operationManager.stopOperation();
+            nextionDisplay.showMessage("Operation stopped");
+          }
+          
+          nextionDisplay.showEmergencyStop();
         }
-        
-        nextionDisplay.showEmergencyStop();
       }
     }
     return;
@@ -362,10 +369,24 @@ void processKeypadEvent() {
   // Serial1.print("t0.txt=\"" + String(isPress ? "Press " : "Release ") + String(keyCode) + "\"");
   // Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
   
-  // Arrow key handling for manual movement
+  // Arrow key handling - either for setup selection or manual movement
   if (keyCode == B_LEFT || keyCode == B_RIGHT || keyCode == B_UP || keyCode == B_DOWN) {
     if (isPress && !motionControl.getEmergencyStop()) {
-      performManualMovement(keyCode);
+      // Check if we're in setupIndex 0 for direction/type selection
+      if (operationManager.getMode() == MODE_TURN && operationManager.getSetupIndex() == 0) {
+        // Arrow keys for direction/type selection (R→L/L→R/INT/EXT)
+        if (keyCode == B_LEFT || keyCode == B_RIGHT) {
+          // Toggle direction: Left/Right arrows for R→L vs L→R
+          operationManager.toggleDirection();
+        } else if (keyCode == B_UP || keyCode == B_DOWN) {
+          // Toggle type: Up/Down arrows for Internal vs External
+          operationManager.setInternalOperation(!operationManager.getInternalOperation());
+        }
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      } else {
+        // Normal manual movement
+        performManualMovement(keyCode);
+      }
     }
     return; // Exit early for arrow keys
   }
@@ -377,38 +398,43 @@ void processKeypadEvent() {
   
   // Process key according to MyHardware.txt mappings
   switch (keyCode) {
-    case B_ON:     // ENTER - Start operation or advance setup
+    case B_ON:     // ENTER - Start operation or advance setup (h5.ino style)
       if (!motionControl.getEmergencyStop()) {
         if (operationManager.isInNumpadInput()) {
-          // Handle numpad input confirmation
-          OperationState state = operationManager.getState();
-          if (state == STATE_TOUCHOFF_X || state == STATE_TOUCHOFF_Z) {
-            // Confirm touch-off coordinate value
-            operationManager.confirmTouchOffValue();
-          } else if (operationManager.isInParameterEntry()) {
+          // Handle numpad input confirmation (touch-offs now use directional keys)
+          if (operationManager.isInParameterEntry()) {
             // Confirm parameter value
             operationManager.confirmParameterValue();
           }
           nextionDisplay.showMessage(operationManager.getPromptText());
         } else if (operationManager.getMode() != MODE_NORMAL) {
-          // Operation mode - handle setup and start
-          OperationState state = operationManager.getState();
-          if (state == STATE_IDLE || 
-              state == STATE_SETUP_LENGTH || 
-              state == STATE_SETUP_PASSES || 
-              state == STATE_SETUP_CONE) {
-            // Advance setup
-            operationManager.nextSetupStep();
+          // h5.ino-style setupIndex progression
+          bool isOn = operationManager.isRunning();
+          int setupIndex = operationManager.getSetupIndex();
+          int lastSetupIndex = operationManager.getLastSetupIndex();
+          
+          // Check if we need to validate stops first (h5.ino style)
+          bool missingZStops = operationManager.needsZStops() && 
+                              (!operationManager.hasTouchOffZ());  // TODO: Add stop checking
+          bool missingStops = missingZStops || (!operationManager.hasTouchOffX());
+          
+          if (!isOn && operationManager.isPassMode() && missingStops) {
+            nextionDisplay.showMessage("Set all stops first");
+          } else if (!isOn && setupIndex < lastSetupIndex) {
+            // h5.ino line 2686: Move to the next setup step
+            operationManager.advanceSetupIndex();
             nextionDisplay.showMessage(operationManager.getPromptText());
-          } else if (state == STATE_READY) {
+          } else if (!isOn && setupIndex >= lastSetupIndex) {
             // Start operation
             if (operationManager.startOperation()) {
               nextionDisplay.showMessage("Operation started");
             } else {
               nextionDisplay.showMessage("Cannot start - check setup");
             }
-          } else if (state == STATE_RUNNING) {
-            // Advance to next pass
+          } else if (isOn && (operationManager.getMode() == MODE_TURN || 
+                             operationManager.getMode() == MODE_FACE || 
+                             operationManager.getMode() == MODE_THREAD)) {
+            // h5.ino line 2687: Move to the next pass
             operationManager.advancePass();
           }
         } else {
@@ -534,8 +560,18 @@ void processKeypadEvent() {
     }
     
     // Plus/Minus keys - Context-aware functionality
-    case B_PLUS:   // Numpad plus - increment parameters or decimal point
-      if (operationManager.isInNumpadInput()) {
+    case B_PLUS:   // Numpad plus - increment pitch or parameters
+      // Pitch adjustment always works (user requirement)
+      if (!operationManager.isInNumpadInput()) {
+        // Increment pitch by small amount (like h5.ino)
+        long currentDupr = motionControl.getDupr();  // Get current pitch
+        long delta = (operationManager.getCurrentMeasure() == MEASURE_METRIC) ? 100 : 254; // 0.01mm or 0.001"
+        long newDupr = currentDupr + delta;
+        if (newDupr <= DUPR_MAX) {
+          motionControl.setThreadPitch(newDupr);
+          nextionDisplay.showMessage("Pitch: " + operationManager.formatDupr(newDupr));
+        }
+      } else if (operationManager.isInNumpadInput()) {
         // In numpad mode: use plus key for decimal point
         operationManager.handleNumpadInput('.');
         nextionDisplay.showMessage(operationManager.getPromptText());
@@ -543,7 +579,7 @@ void processKeypadEvent() {
         // In setup mode: increment parameters
         OperationState state = operationManager.getState();
         
-        if (state == STATE_SETUP_LENGTH) {
+        if (state == STATE_TARGET_LENGTH) {
           // Adjust cut length/depth
           float currentLength = 10.0; // TODO: Get current from operation manager
           operationManager.setCutLength(currentLength + manualStepSize);
@@ -564,8 +600,18 @@ void processKeypadEvent() {
       }
       break;
       
-    case B_MINUS:  // Numpad minus - decrement parameters or negative sign
-      if (operationManager.isInNumpadInput()) {
+    case B_MINUS:  // Numpad minus - decrement pitch or parameters  
+      // Pitch adjustment always works (user requirement)
+      if (!operationManager.isInNumpadInput()) {
+        // Decrement pitch by small amount (like h5.ino)
+        long currentDupr = motionControl.getDupr();  // Get current pitch
+        long delta = (operationManager.getCurrentMeasure() == MEASURE_METRIC) ? 100 : 254; // 0.01mm or 0.001"
+        long newDupr = currentDupr - delta;
+        if (newDupr >= -DUPR_MAX) {
+          motionControl.setThreadPitch(newDupr);
+          nextionDisplay.showMessage("Pitch: " + operationManager.formatDupr(newDupr));
+        }
+      } else if (operationManager.isInNumpadInput()) {
         // In numpad mode: use minus key for negative sign
         operationManager.handleNumpadInput('-');
         nextionDisplay.showMessage(operationManager.getPromptText());
@@ -573,7 +619,7 @@ void processKeypadEvent() {
         // In setup mode: decrement parameters
         OperationState state = operationManager.getState();
         
-        if (state == STATE_SETUP_LENGTH) {
+        if (state == STATE_TARGET_LENGTH) {
           // Adjust cut length/depth
           float currentLength = 10.0; // TODO: Get current from operation manager
           operationManager.setCutLength(currentLength - manualStepSize);
@@ -600,9 +646,10 @@ void processKeypadEvent() {
       nextionDisplay.showMessage("GEARBOX mode");
       break;
       
-    case B_MODE_TURN:   // F2 - Turning mode
+    case B_MODE_TURN:   // F2 - Turning mode with setup flow
       operationManager.setMode(MODE_TURN);
-      nextionDisplay.showMessage("TURNING mode");
+      operationManager.resetSetupIndex();  // Start at setupIndex 0 for direction selection
+      nextionDisplay.showMessage(operationManager.getPromptText());
       break;
       
     case B_MODE_FACE:   // F3 - Facing mode
@@ -640,19 +687,99 @@ void processKeypadEvent() {
       nextionDisplay.showMessage("GCODE mode");
       break;
       
-    // Touch-off keys
-    case B_STOPL:   // 'a' - Start X touch-off
-    case B_STOPR:   // 'd' - Start X touch-off
-      if (!motionControl.getEmergencyStop() && operationManager.getMode() != MODE_NORMAL) {
-        operationManager.startTouchOffX();
+    // Touch-off keys - directional confirmation based on operation type
+    case B_STOPL:   // 'a' - Left/R→L confirmation for setup stages
+      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+        int setupIndex = operationManager.getSetupIndex();
+        if (setupIndex == 1) {
+          // Touch off confirmation: a = L→R operation
+          operationManager.setLeftToRight(true);
+          operationManager.advanceSetupIndex();
+        } else if (setupIndex == 2) {
+          // Target confirmation: a = R→L operation  
+          operationManager.setLeftToRight(false);
+          operationManager.advanceSetupIndex();
+        } else {
+          // Original behavior for other states
+          OperationState state = operationManager.getState();
+          if ((state == STATE_TOUCHOFF_X || state == STATE_TOUCHOFF_Z) && operationManager.isInNumpadInput()) {
+            operationManager.confirmTouchOffValue();
+          } else {
+            operationManager.startTouchOffX();
+          }
+        }
         nextionDisplay.showMessage(operationManager.getPromptText());
       }
       break;
       
-    case B_STOPU:   // 'w' - Start Z touch-off
-    case B_STOPD:   // 's' - Start Z touch-off
-      if (!motionControl.getEmergencyStop() && operationManager.getMode() != MODE_NORMAL) {
-        operationManager.startTouchOffZ();
+    case B_STOPR:   // 'd' - Right/R→L confirmation for setup stages
+      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+        int setupIndex = operationManager.getSetupIndex();
+        if (setupIndex == 1) {
+          // Touch off confirmation: d = R→L operation
+          operationManager.setLeftToRight(false);
+          operationManager.advanceSetupIndex();
+        } else if (setupIndex == 2) {
+          // Target confirmation: d = L→R operation  
+          operationManager.setLeftToRight(true);
+          operationManager.advanceSetupIndex();
+        } else {
+          // Original behavior for other states
+          OperationState state = operationManager.getState();
+          if ((state == STATE_TOUCHOFF_X || state == STATE_TOUCHOFF_Z) && operationManager.isInNumpadInput()) {
+            operationManager.confirmTouchOffValue();
+          } else {
+            operationManager.startTouchOffX();
+          }
+        }
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      }
+      break;
+      
+    case B_STOPU:   // 'w' - Internal operation confirmation for setup stages
+      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+        int setupIndex = operationManager.getSetupIndex();
+        if (setupIndex == 1) {
+          // Touch off confirmation: w = internal operation
+          operationManager.setInternalOperation(true);
+          operationManager.advanceSetupIndex();
+        } else if (setupIndex == 2) {
+          // Target confirmation: w = internal operation  
+          operationManager.setInternalOperation(true);
+          operationManager.advanceSetupIndex();
+        } else {
+          // Original behavior for other states
+          OperationState state = operationManager.getState();
+          if ((state == STATE_TOUCHOFF_X || state == STATE_TOUCHOFF_Z) && operationManager.isInNumpadInput()) {
+            operationManager.confirmTouchOffValue();
+          } else {
+            operationManager.startTouchOffZ();
+          }
+        }
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      }
+      break;
+      
+    case B_STOPD:   // 's' - External operation confirmation for setup stages
+      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+        int setupIndex = operationManager.getSetupIndex();
+        if (setupIndex == 1) {
+          // Touch off confirmation: s = external operation
+          operationManager.setInternalOperation(false);
+          operationManager.advanceSetupIndex();
+        } else if (setupIndex == 2) {
+          // Target confirmation: s = external operation  
+          operationManager.setInternalOperation(false);
+          operationManager.advanceSetupIndex();
+        } else {
+          // Original behavior for other states
+          OperationState state = operationManager.getState();
+          if ((state == STATE_TOUCHOFF_X || state == STATE_TOUCHOFF_Z) && operationManager.isInNumpadInput()) {
+            operationManager.confirmTouchOffValue();
+          } else {
+            operationManager.startTouchOffZ();
+          }
+        }
         nextionDisplay.showMessage(operationManager.getPromptText());
       }
       break;
