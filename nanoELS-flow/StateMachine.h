@@ -30,7 +30,7 @@ enum SystemState {
     STATE_DISPLAY_UPDATE,
     STATE_WEB_UPDATE,
     STATE_DIAGNOSTICS,
-    STATE_IDLE
+    SYS_STATE_IDLE  // Renamed to avoid conflict with OperationManager::STATE_IDLE
 };
 
 // Task structure for time-sliced scheduler

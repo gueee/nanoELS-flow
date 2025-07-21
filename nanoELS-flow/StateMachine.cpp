@@ -11,7 +11,6 @@ SystemStateMachine stateMachine;
 
 // External references
 extern PS2KeyAdvanced keyboard;
-extern int currentMode;
 extern float manualStepSize;
 
 // TimeSlicedScheduler Implementation
@@ -162,7 +161,7 @@ const SystemStateMachine::StateConfig SystemStateMachine::stateConfigs[] = {
     {STATE_DISPLAY_UPDATE, 10, false},    // 10ms max, not interruptible
     {STATE_WEB_UPDATE, 20, false},        // 20ms max, not interruptible
     {STATE_DIAGNOSTICS, 50, false},       // 50ms max, not interruptible
-    {STATE_IDLE, 100, true}               // 100ms max, interruptible
+    {SYS_STATE_IDLE, 100, true}               // 100ms max, interruptible
 };
 
 SystemStateMachine::SystemStateMachine() {
@@ -221,10 +220,10 @@ void SystemStateMachine::update() {
             
         case STATE_DIAGNOSTICS:
             handleDiagnostics();
-            currentState = STATE_IDLE;
+            currentState = SYS_STATE_IDLE;
             break;
             
-        case STATE_IDLE:
+        case SYS_STATE_IDLE:
             handleIdle();
             currentState = STATE_EMERGENCY_CHECK;
             break;
@@ -318,7 +317,7 @@ const char* SystemStateMachine::getStateName(SystemState state) {
         case STATE_DISPLAY_UPDATE: return "DISPLAY_UPDATE";
         case STATE_WEB_UPDATE: return "WEB_UPDATE";
         case STATE_DIAGNOSTICS: return "DIAGNOSTICS";
-        case STATE_IDLE: return "IDLE";
+        case SYS_STATE_IDLE: return "IDLE";
         default: return "UNKNOWN";
     }
 }

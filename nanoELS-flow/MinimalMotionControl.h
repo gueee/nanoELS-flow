@@ -168,6 +168,10 @@ public:
     void setMPGStepSize(int axis, int32_t stepSizeDU);
     int32_t getMPGStepSize(int axis) { return mpg[axis].stepSize; }
     
+    // MPG with float interface for OperationManager
+    void setMPGStepSize(int axis, float mm);
+    float getMPGStepSize(int axis) const;
+    
     // Safety
     void setEmergencyStop(bool stop);
     bool getEmergencyStop() { return emergencyStop; }
@@ -179,6 +183,11 @@ public:
     int32_t getSpindlePositionAvg() { return spindle.positionAvg; }
     void resetSpindlePosition();
     void zeroAxis(int axis);                // Set current position as zero origin
+    
+    // Operation support methods
+    int32_t getAxisPosition(int axis) { return axes[axis].position; }
+    long getDupr() const { return spindle.threadPitch; }
+    int getStarts() const { return spindle.threadStarts; }
     
     // Status and diagnostics
     float getFollowingError(int axis);          // Following error in micrometers

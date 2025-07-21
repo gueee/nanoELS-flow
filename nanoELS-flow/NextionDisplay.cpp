@@ -1,4 +1,5 @@
 #include "NextionDisplay.h"
+#include "OperationManager.h"
 
 // Global instance
 NextionDisplay nextionDisplay;
@@ -131,7 +132,7 @@ void NextionDisplay::showWiFiStatus(const String& status, bool connecting) {
 
 void NextionDisplay::showMotionStatus() {
   // Top line: Mode and status (matching original h5.ino format)
-  extern int currentMode;
+  extern OperationManager operationManager;
   extern float manualStepSize;
   String topLine = "";
   
@@ -144,31 +145,42 @@ void NextionDisplay::showMotionStatus() {
     topLine = "EMERGENCY STOP";
   } else if (xMoving || zMoving) {
     topLine = "MOVING - ";
-    switch(currentMode) {
-      case 0: topLine += "Manual"; break;
-      case 1: topLine += "Threading"; break;
-      case 2: topLine += "Turning"; break;
-      case 3: topLine += "Facing"; break;
-      case 4: topLine += "Cone"; break;
-      case 5: topLine += "Cutting"; break;
-      default: topLine += "Mode " + String(currentMode); break;
+    switch(operationManager.getMode()) {
+      case MODE_NORMAL: topLine += "Manual"; break;
+      case MODE_TURN: topLine += "Turning"; break;
+      case MODE_FACE: topLine += "Facing"; break;
+      case MODE_THREAD: topLine += "Threading"; break;
+      case MODE_CONE: topLine += "Cone"; break;
+      case MODE_CUT: topLine += "Cutting"; break;
+      case MODE_ASYNC: topLine += "Async"; break;
+      case MODE_ELLIPSE: topLine += "Ellipse"; break;
+      case MODE_GCODE: topLine += "GCode"; break;
+      default: topLine += "Mode " + String(operationManager.getMode()); break;
     }
   } else {
-    switch(currentMode) {
-      case 0: topLine = "Manual Mode"; break;
-      case 1: topLine = "Threading"; break;
-      case 2: topLine = "Turning"; break;
-      case 3: topLine = "Facing"; break;
-      case 4: topLine = "Cone"; break;
-      case 5: topLine = "Cutting"; break;
-      default: topLine = "Mode " + String(currentMode); break;
+    switch(operationManager.getMode()) {
+      case MODE_NORMAL: topLine = "Manual Mode"; break;
+      case MODE_TURN: topLine = "Turning"; break;
+      case MODE_FACE: topLine = "Facing"; break;
+      case MODE_THREAD: topLine = "Threading"; break;
+      case MODE_CONE: topLine = "Cone"; break;
+      case MODE_CUT: topLine = "Cutting"; break;
+      case MODE_ASYNC: topLine = "Async Mode"; break;
+      case MODE_ELLIPSE: topLine = "Ellipse Mode"; break;
+      case MODE_GCODE: topLine = "GCode Mode"; break;
+      default: topLine = "Mode " + String(operationManager.getMode()); break;
     }
     topLine += " Step:" + String(manualStepSize) + "mm";
   }
   setTopLine(topLine);
   
-  // Pitch line: Thread pitch info (matching original format)
-  String pitchLine = "Pitch 1.25mm x1";  // Default values for now
+  // Pitch line: Thread pitch info (matching original h5.ino format)
+  long dupr = motionControl.getDupr();
+  int starts = motionControl.getStarts();
+  String pitchLine = "Pitch " + operationManager.formatDupr(dupr);
+  if (starts != 1) {
+    pitchLine += " x" + String(starts);
+  }
   setPitchLine(pitchLine);
   
   // Position line: Axis positions (matching original format "Z:xxx.xx X:xxx.xx")

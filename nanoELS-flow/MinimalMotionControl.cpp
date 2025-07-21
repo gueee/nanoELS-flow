@@ -578,6 +578,20 @@ void MinimalMotionControl::setMPGStepSize(int axis, int32_t stepSizeDU) {
     }
 }
 
+// Float interface for OperationManager compatibility
+void MinimalMotionControl::setMPGStepSize(int axis, float mm) {
+    if (axis >= 0 && axis < 2) {
+        mpg[axis].stepSize = mmToSteps(axis, mm);
+    }
+}
+
+float MinimalMotionControl::getMPGStepSize(int axis) const {
+    if (axis >= 0 && axis < 2) {
+        return mpg[axis].stepSize / 10000.0f;  // Convert deci-microns to mm
+    }
+    return 0.0f;
+}
+
 void MinimalMotionControl::shutdown() {
     setEmergencyStop(true);
     

@@ -46,6 +46,7 @@
 // Project modules - Minimal implementation with h5.ino-inspired precision control
 #include "SetupConstants.h"      // Hardware configuration constants
 #include "MinimalMotionControl.h" // h5.ino-inspired minimal motion controller
+#include "OperationManager.h"     // Touch-off based operation management
 #include "WebInterface.h"
 #include "NextionDisplay.h"
 // MyHardware.h merged into SetupConstants.h
@@ -60,6 +61,9 @@
 // Nextion display system (handles touch screen display)
 // Global instance declared in NextionDisplay.h: extern NextionDisplay nextionDisplay;
 
+// Operation manager (handles turning, threading, facing operations)
+OperationManager operationManager;
+
 // PS2 Keyboard interface (for future use)
 PS2KeyAdvanced keyboard;
 
@@ -70,7 +74,6 @@ Preferences prefs;
 // ===============
 
 // Current machine state
-int currentMode = 0;  // 0=manual, 1=threading, etc.
 float manualStepSize = 1.0;  // Current step size for manual movements (mm)
 
 // Shared variable for emergency stop coordination
@@ -135,6 +138,7 @@ void resetArrowKeyStates();                   // Reset all key states (for emerg
 void taskEmergencyCheck();
 void taskKeyboardScan();
 void taskMotionUpdate();
+void taskOperationUpdate();
 void taskDisplayUpdate();
 void taskWebUpdate();
 void taskDiagnostics();
@@ -167,11 +171,15 @@ void setup() {
     Serial.println("✗ Motion control initialization failed");
   }
   
+  // Initialize operation manager
+  operationManager.init(&motionControl);
+  Serial.println("✓ Operation manager initialized");
+  
   // Enable MPGs automatically on startup
   motionControl.enableMPG(AXIS_X, true);
-  motionControl.setMPGStepSize(AXIS_X, 10000); // 1mm default step size
+  motionControl.setMPGStepSize(AXIS_X, (int32_t)10000); // 1mm default step size
   motionControl.enableMPG(AXIS_Z, true);
-  motionControl.setMPGStepSize(AXIS_Z, 10000); // 1mm default step size
+  motionControl.setMPGStepSize(AXIS_Z, (int32_t)10000); // 1mm default step size
   Serial.println("✓ MPGs enabled for both axes (1mm step size)");
   
   Serial.println("Setup complete - SAFETY READY");
@@ -207,6 +215,7 @@ void setup() {
   scheduler.addTask("EmergencyCheck", taskEmergencyCheck, PRIORITY_CRITICAL, 0);  // Every loop
   scheduler.addTask("KeyboardScan", taskKeyboardScan, PRIORITY_CRITICAL, 0);      // Every loop
   scheduler.addTask("MotionUpdate", taskMotionUpdate, PRIORITY_CRITICAL, 0);      // Every loop (~100kHz)
+  scheduler.addTask("OperationUpdate", taskOperationUpdate, PRIORITY_CRITICAL, 0); // Every loop for operations
   scheduler.addTask("DisplayUpdate", taskDisplayUpdate, PRIORITY_NORMAL, 50);     // 20Hz
   scheduler.addTask("WebUpdate", taskWebUpdate, PRIORITY_NORMAL, 20);             // 50Hz
   scheduler.addTask("Diagnostics", taskDiagnostics, PRIORITY_LOW, 5000);          // 0.2Hz
@@ -335,6 +344,13 @@ void processKeypadEvent() {
         emergencyKeyDetected = true;
         motionControl.setEmergencyStop(true);
         resetArrowKeyStates();  // Stop any movement
+        
+        // Stop any running operations
+        if (operationManager.getState() == STATE_RUNNING) {
+          operationManager.stopOperation();
+          nextionDisplay.showMessage("Operation stopped");
+        }
+        
         nextionDisplay.showEmergencyStop();
       }
     }
@@ -361,11 +377,46 @@ void processKeypadEvent() {
   
   // Process key according to MyHardware.txt mappings
   switch (keyCode) {
-    case B_ON:     // ENTER - Show status (no test sequences in minimal version)
+    case B_ON:     // ENTER - Start operation or advance setup
       if (!motionControl.getEmergencyStop()) {
-        nextionDisplay.showMessage("Status OK");
-        Serial.println("System status: Ready");
-        motionControl.printDiagnostics();
+        if (operationManager.isInNumpadInput()) {
+          // Handle numpad input confirmation
+          OperationState state = operationManager.getState();
+          if (state == STATE_TOUCHOFF_X || state == STATE_TOUCHOFF_Z) {
+            // Confirm touch-off coordinate value
+            operationManager.confirmTouchOffValue();
+          } else if (operationManager.isInParameterEntry()) {
+            // Confirm parameter value
+            operationManager.confirmParameterValue();
+          }
+          nextionDisplay.showMessage(operationManager.getPromptText());
+        } else if (operationManager.getMode() != MODE_NORMAL) {
+          // Operation mode - handle setup and start
+          OperationState state = operationManager.getState();
+          if (state == STATE_IDLE || 
+              state == STATE_SETUP_LENGTH || 
+              state == STATE_SETUP_PASSES || 
+              state == STATE_SETUP_CONE) {
+            // Advance setup
+            operationManager.nextSetupStep();
+            nextionDisplay.showMessage(operationManager.getPromptText());
+          } else if (state == STATE_READY) {
+            // Start operation
+            if (operationManager.startOperation()) {
+              nextionDisplay.showMessage("Operation started");
+            } else {
+              nextionDisplay.showMessage("Cannot start - check setup");
+            }
+          } else if (state == STATE_RUNNING) {
+            // Advance to next pass
+            operationManager.advancePass();
+          }
+        } else {
+          // Normal mode - show status
+          nextionDisplay.showMessage("Status OK");
+          Serial.println("System status: Ready");
+          motionControl.printDiagnostics();
+        }
       } else {
         nextionDisplay.showMessage("E-STOP ACTIVE - Press ESC");
       }
@@ -432,8 +483,19 @@ void processKeypadEvent() {
       break;
     
     case B_MEASURE: // m - Cycle measurement units (metric/inch/TPI)
-      // TODO: Implement unit switching
-      nextionDisplay.showMessage("Units: Metric");
+      operationManager.cycleMeasure();
+      {
+        String unitText = "Units: ";
+        int currentMeasure = operationManager.getCurrentMeasure();
+        if (currentMeasure == MEASURE_METRIC) {
+          unitText += "Metric";
+        } else if (currentMeasure == MEASURE_INCH) {
+          unitText += "Inch";
+        } else {
+          unitText += "TPI";
+        }
+        nextionDisplay.showMessage(unitText);
+      }
       break;
       
     case B_REVERSE: // r - Reverse direction (left-hand threads)
@@ -470,6 +532,154 @@ void processKeypadEvent() {
       }
       break;
     }
+    
+    // Plus/Minus keys - Context-aware functionality
+    case B_PLUS:   // Numpad plus - increment parameters or decimal point
+      if (operationManager.isInNumpadInput()) {
+        // In numpad mode: use plus key for decimal point
+        operationManager.handleNumpadInput('.');
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      } else if (operationManager.getMode() != MODE_NORMAL) {
+        // In setup mode: increment parameters
+        OperationState state = operationManager.getState();
+        
+        if (state == STATE_SETUP_LENGTH) {
+          // Adjust cut length/depth
+          float currentLength = 10.0; // TODO: Get current from operation manager
+          operationManager.setCutLength(currentLength + manualStepSize);
+          nextionDisplay.showMessage("Length: " + String(currentLength + manualStepSize, 2) + "mm");
+        } else if (state == STATE_SETUP_PASSES) {
+          // Adjust number of passes
+          int currentPasses = operationManager.getTotalPasses();
+          int newPasses = currentPasses + 1;
+          operationManager.setNumPasses(newPasses);
+          nextionDisplay.showMessage("Passes: " + String(newPasses));
+        } else if (state == STATE_SETUP_CONE) {
+          // Adjust cone ratio
+          float ratio = 0.0; // TODO: Get current from operation manager
+          float newRatio = ratio + 0.001f;
+          operationManager.setConeRatio(newRatio);
+          nextionDisplay.showMessage("Ratio: " + String(newRatio, 4));
+        }
+      }
+      break;
+      
+    case B_MINUS:  // Numpad minus - decrement parameters or negative sign
+      if (operationManager.isInNumpadInput()) {
+        // In numpad mode: use minus key for negative sign
+        operationManager.handleNumpadInput('-');
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      } else if (operationManager.getMode() != MODE_NORMAL) {
+        // In setup mode: decrement parameters
+        OperationState state = operationManager.getState();
+        
+        if (state == STATE_SETUP_LENGTH) {
+          // Adjust cut length/depth
+          float currentLength = 10.0; // TODO: Get current from operation manager
+          operationManager.setCutLength(currentLength - manualStepSize);
+          nextionDisplay.showMessage("Length: " + String(currentLength - manualStepSize, 2) + "mm");
+        } else if (state == STATE_SETUP_PASSES) {
+          // Adjust number of passes
+          int currentPasses = operationManager.getTotalPasses();
+          int newPasses = currentPasses - 1;
+          operationManager.setNumPasses(newPasses);
+          nextionDisplay.showMessage("Passes: " + String(newPasses));
+        } else if (state == STATE_SETUP_CONE) {
+          // Adjust cone ratio
+          float ratio = 0.0; // TODO: Get current from operation manager
+          float newRatio = ratio - 0.001f;
+          operationManager.setConeRatio(newRatio);
+          nextionDisplay.showMessage("Ratio: " + String(newRatio, 4));
+        }
+      }
+      break;
+    
+    // Function keys - Operation mode selection
+    case B_MODE_GEARS:  // F1 - Normal gearbox mode
+      operationManager.setMode(MODE_NORMAL);
+      nextionDisplay.showMessage("GEARBOX mode");
+      break;
+      
+    case B_MODE_TURN:   // F2 - Turning mode
+      operationManager.setMode(MODE_TURN);
+      nextionDisplay.showMessage("TURNING mode");
+      break;
+      
+    case B_MODE_FACE:   // F3 - Facing mode
+      operationManager.setMode(MODE_FACE);
+      nextionDisplay.showMessage("FACING mode");
+      break;
+      
+    case B_MODE_CONE:   // F4 - Cone mode
+      operationManager.setMode(MODE_CONE);
+      nextionDisplay.showMessage("CONE mode");
+      break;
+      
+    case B_MODE_CUT:    // F5 - Cut-off mode
+      operationManager.setMode(MODE_CUT);
+      nextionDisplay.showMessage("CUT-OFF mode");
+      break;
+      
+    case B_MODE_THREAD: // F6 - Threading mode
+      operationManager.setMode(MODE_THREAD);
+      nextionDisplay.showMessage("THREADING mode");
+      break;
+      
+    case B_MODE_ASYNC:  // F7 - Async mode
+      operationManager.setMode(MODE_ASYNC);
+      nextionDisplay.showMessage("ASYNC mode");
+      break;
+      
+    case B_MODE_ELLIPSE: // F8 - Ellipse mode
+      operationManager.setMode(MODE_ELLIPSE);
+      nextionDisplay.showMessage("ELLIPSE mode");
+      break;
+      
+    case B_MODE_GCODE:  // F9 - G-code mode
+      operationManager.setMode(MODE_GCODE);
+      nextionDisplay.showMessage("GCODE mode");
+      break;
+      
+    // Touch-off keys
+    case B_STOPL:   // 'a' - Start X touch-off
+    case B_STOPR:   // 'd' - Start X touch-off
+      if (!motionControl.getEmergencyStop() && operationManager.getMode() != MODE_NORMAL) {
+        operationManager.startTouchOffX();
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      }
+      break;
+      
+    case B_STOPU:   // 'w' - Start Z touch-off
+    case B_STOPD:   // 's' - Start Z touch-off
+      if (!motionControl.getEmergencyStop() && operationManager.getMode() != MODE_NORMAL) {
+        operationManager.startTouchOffZ();
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      }
+      break;
+      
+    // Number keys for coordinate entry
+    case B_0:
+    case B_1:
+    case B_2:
+    case B_3:
+    case B_4:
+    case B_5:
+    case B_6:
+    case B_7:
+    case B_8:
+    case B_9:
+      if (operationManager.isInNumpadInput() || operationManager.isInParameterEntry()) {
+        operationManager.handleNumpadInput('0' + (keyCode - B_0));
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      }
+      break;
+      
+    case B_BACKSPACE:  // Backspace for numpad entry
+      if (operationManager.isInNumpadInput() || operationManager.isInParameterEntry()) {
+        operationManager.handleNumpadBackspace();
+        nextionDisplay.showMessage(operationManager.getPromptText());
+      }
+      break;
         
     default:
       // Unknown key - show step size as feedback
@@ -527,6 +737,11 @@ void taskMotionUpdate() {
   motionControl.update();
 }
 
+void taskOperationUpdate() {
+  // Operation manager update - runs every loop for operations
+  operationManager.update();
+}
+
 void taskDisplayUpdate() {
   // Display update - runs at 20Hz (50ms)
   static bool splashHandled = false;
@@ -537,6 +752,29 @@ void taskDisplayUpdate() {
   // Update diagnostics display when enabled
   if (showDiagnostics && splashHandled) {
     updateDiagnosticsDisplay();
+  }
+  
+  // Update operation status display
+  if (splashHandled && operationManager.getMode() != MODE_NORMAL) {
+    // Show operation status on line 0
+    String status = operationManager.getStatusText();
+    Serial1.print("t0.txt=\"" + status + "\"");
+    Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+    
+    // Show operation prompt or progress on line 3
+    if (operationManager.getState() != STATE_RUNNING) {
+      String prompt = operationManager.getPromptText();
+      Serial1.print("t3.txt=\"" + prompt + "\"");
+      Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+    } else {
+      // Show progress during operation
+      float progress = operationManager.getProgress();
+      String progressText = "Pass " + String(operationManager.getCurrentPass() + 1) + 
+                           "/" + String(operationManager.getTotalPasses()) + 
+                           " " + String(int(progress * 100)) + "%";
+      Serial1.print("t3.txt=\"" + progressText + "\"");
+      Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+    }
   }
   
   // Additional display updates can go here
