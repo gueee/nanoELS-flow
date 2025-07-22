@@ -68,8 +68,9 @@ nanoELS-flow/                          # Arduino IDE project folder
 The application follows a minimalist architecture based on h5.ino proven algorithms:
 
 1. **MinimalMotionControl** (`MinimalMotionControl.h/.cpp`): Professional precision motion control with h5.ino algorithms achieving 0.0007mm following error
-2. **WebInterface** (`WebInterface.h/.cpp`): HTTP server and WebSocket communication for remote control and monitoring
-3. **NextionDisplay** (`NextionDisplay.h/.cpp`): Touch screen interface for status display and control
+2. **OperationManager** (`OperationManager.h/.cpp`): h5.ino-style setup workflows and operation state management with setupIndex progression
+3. **WebInterface** (`WebInterface.h/.cpp`): HTTP server and WebSocket communication for remote control and monitoring
+4. **NextionDisplay** (`NextionDisplay.h/.cpp`): Touch screen interface for status display and control
 
 ### Key Architectural Patterns
 - **h5.ino Precision Algorithms**: Proven backlash compensation and position tracking from original nanoELS
@@ -110,6 +111,49 @@ void loop() {
   // Update displays and interfaces
   scheduler.update();
 }
+```
+
+### Key API Patterns
+**Motion Control API**:
+```cpp
+// Get current pitch (dupr) value
+long currentDupr = motionControl.getDupr();
+
+// Set thread pitch (for pitch adjustment)
+motionControl.setThreadPitch(newDupr);
+
+// Direct position control
+motionControl.setTargetPosition(AXIS_X, targetSteps);
+motionControl.setTargetPosition(AXIS_Z, targetSteps);
+```
+
+**OperationManager API**:
+```cpp
+// Setup index progression (h5.ino style)
+int setupIndex = operationManager.getSetupIndex();
+operationManager.resetSetupIndex();  // Return to setupIndex 0
+operationManager.advanceSetupIndex(); // Move to next setup stage
+
+// Direction and type control
+operationManager.setInternalOperation(bool internal);
+operationManager.setLeftToRight(bool leftToRight);
+operationManager.toggleDirection();
+
+// Measurement system
+int currentMeasure = operationManager.getCurrentMeasure(); // MEASURE_METRIC, MEASURE_INCH, MEASURE_TPI
+
+// Display prompts
+String promptText = operationManager.getPromptText();
+```
+
+**Nextion Display API**:
+```cpp
+// Direct Nextion commands (h5.ino style)
+Serial1.print("t3.txt=\"message\""); 
+Serial1.write(0xFF); Serial1.write(0xFF); Serial1.write(0xFF);
+
+// Via NextionDisplay wrapper
+nextionDisplay.showMessage("Status text");
 ```
 
 ## Development Commands
@@ -198,6 +242,7 @@ The system supports two WiFi modes:
 - PS2 keyboard interface with full key mapping
 - Web interface with HTTP and WebSocket support
 - **MPG Support**: Manual Pulse Generators for both X and Z axes with automatic initialization
+- **User-Defined TURN Setup Workflow**: Complete F2 setup process with direction/type selection
 
 **🔧 Current Functionality**:
 - **Manual Mode**: Arrow keys directly update target positions with h5.ino algorithms
@@ -205,6 +250,7 @@ The system supports two WiFi modes:
 - **Emergency Stop**: Immediate response integrated throughout motion system
 - **Threading Mode**: Professional precision using proven h5.ino positionFromSpindle() calculations
 - **Display**: Real-time status and position updates
+- **Turn Mode Setup**: F2 → setupIndex-based workflow with arrow key selection and stop key confirmations
 
 ### Library Dependencies
 Required libraries (install via Arduino IDE Library Manager):
@@ -308,12 +354,18 @@ Required libraries (install via Arduino IDE Library Manager):
 
 **Operation Controls**:
 - B_ON (50): Enter - starts operation/mode
-- B_OFF (145): ESC - **IMMEDIATE EMERGENCY STOP**
+- B_OFF (145): ESC - **IMMEDIATE EMERGENCY STOP** or return to setupIndex 0 during setup
 - B_STEP (86): Tilda (~) - cycle step size (0.01/0.1/1.0/10.0mm)
 - B_X_ENA (67): c - Enable/disable X axis
 - B_Z_ENA (113): q - Enable/disable Z axis
 - B_MEASURE (66): m - Toggle X-axis MPG (Manual Pulse Generator)
 - B_REVERSE (148): r - Toggle Z-axis MPG (Manual Pulse Generator)
+- B_PLUS (87): Numpad plus - **INCREMENT PITCH** (works anytime, even during cutting)
+- B_MINUS (73): Numpad minus - **DECREMENT PITCH** (works anytime, even during cutting)
+
+**Setup Mode Keys (F2 Turn Mode)**:
+- Arrow Keys (setupIndex 0): Select direction (L/R) and type (Up/Down for INT/EXT)
+- Stop Keys: w=internal, s=external, d=R→L, a=L→R for setup confirmations
 
 **Critical Safety Note**: B_OFF (ESC key) toggles emergency stop - press once to activate, press again to clear.
 
@@ -327,6 +379,31 @@ Required libraries (install via Arduino IDE Library Manager):
 - **Target Position Updates**: Arrow keys directly update motion control target positions
 - **Step Size Control**: Tilda (~) key cycles through step sizes
 - **h5.ino Precision**: Professional threading precision with minimal complexity
+
+### TURN Mode Setup Workflow (F2 Key)
+**CRITICAL**: The F2 key initiates a specific user-defined setup process:
+
+1. **setupIndex 0**: Direction and type selection
+   - **Arrow Keys**: Left/Right = R→L/L→R direction, Up/Down = Internal/External
+   - **Display**: Shows current selection (e.g., "L→R EXT ←→↑↓")
+
+2. **setupIndex 1**: Touch-off confirmation
+   - **Stop Keys**: w=internal, s=external, d=R→L, a=L→R operations
+   - **Display**: "Touch off diameter & face (w/s/d/a)"
+
+3. **setupIndex 2**: Target input confirmation  
+   - **Stop Keys**: a=R→L, d=L→R, w=internal, s=external targets
+   - **Display**: "Input target Ø & length (w/s/d/a)"
+
+4. **setupIndex 3**: Number of passes
+   - **Numpad/Arrows**: Enter pass count, default 3
+   - **Display**: "3 passes (numpad/↑↓)"
+
+5. **Final**: Ready to start
+   - **Enter**: Confirm and start operation
+   - **Display**: "Ready? Press ENTER"
+
+**ESC Navigation**: ESC returns to setupIndex 0 from any stage (non-destructive)
 
 ## Project Memories and Notes
 
