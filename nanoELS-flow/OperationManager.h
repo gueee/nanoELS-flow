@@ -33,6 +33,12 @@ enum OperationMode {
     MODE_GCODE = 8      // G-code execution mode
 };
 
+// Arrow key mode control for safety
+enum ArrowKeyMode {
+    ARROW_MOTION_MODE,      // Normal mode - arrows control axes movement
+    ARROW_NAVIGATION_MODE   // Setup mode - arrows navigate options
+};
+
 // Operation state
 enum OperationState {
     STATE_IDLE,             // No operation active
@@ -87,10 +93,6 @@ private:
     int touchOffAxis;      // 0=X, 1=Z
     
     // Arrow key mode control for safety
-    enum ArrowKeyMode {
-        ARROW_MOTION_MODE,      // Normal mode - arrows control axes movement
-        ARROW_NAVIGATION_MODE   // Setup mode - arrows navigate options
-    };
     ArrowKeyMode arrowKeyMode;
     
     // Direction control for turning operations
@@ -193,6 +195,7 @@ public:
     bool hasTouchOffX() const { return touchOffXValid; }
     bool hasTouchOffZ() const { return touchOffZValid; }
     bool hasTouchOff() const { return touchOffXValid && touchOffZValid; }
+    void setTouchOffAxis(int axis) { touchOffAxis = axis; }
     
     // Parking position management (variable parking system)
     void startParkingSetup();           // Enter parking position setup mode
@@ -200,6 +203,7 @@ public:
     void clearParkingPosition();        // Clear stored parking position
     bool hasParkingPosition() const { return parkingPositionSet; }
     void moveToParkingPosition();       // Move to stored parking position
+    void setParkingPosition(long x, long z) { parkingPositionX = x; parkingPositionZ = z; parkingPositionSet = true; }
     
     // Target value management (numpad entry for targets)
     void startTargetDiameterEntry();    // Start diameter target entry
