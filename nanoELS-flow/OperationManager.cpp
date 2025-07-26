@@ -1087,7 +1087,7 @@ String OperationManager::getPromptText() {
                     if (inNumpadInput && numpadIndex > 0) {
                         return "L:" + getNumpadDisplayText();
                     }
-                    return "Target length";
+                    return "Cut length";
                 } else {
                     // Show current values if set
                     if (targetDiameter > 0 && targetZLength > 0) {
@@ -1337,13 +1337,8 @@ void OperationManager::calculateOperationParameters() {
         cutDepth = mmToSteps(abs(diameterChange) / 2.0f, AXIS_X);  // Radial depth
     }
     
-    if (isLeftToRight) {
-        // Left to right: move in positive Z direction
-        cutLength = mmToSteps(abs(targetLengthMm - touchOffZCoord), AXIS_Z);
-    } else {
-        // Right to left: move in negative Z direction
-        cutLength = mmToSteps(abs(targetLengthMm - touchOffZCoord), AXIS_Z);
-    }
+    // Target length is the distance to cut, not a target position
+    cutLength = mmToSteps(targetLengthMm, AXIS_Z);
 }
 
 // Display text methods (≤21 characters as requested)
