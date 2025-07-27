@@ -81,9 +81,13 @@ long OperationManager::posFromSpindle(int axis, long spindlePos, bool respectLim
     
     long newPos = 0;
     if (axis == AXIS_Z) {
-        newPos = spindlePos * MOTOR_STEPS_Z / (SCREW_Z_DU / 10000.0f) / encoderSteps * dupr * starts;
+        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        float screwPitchMicrons = SCREW_Z_DU / 10.0f;
+        newPos = (long)(spindlePos * MOTOR_STEPS_Z / screwPitchMicrons / encoderSteps * dupr * starts);
     } else {
-        newPos = spindlePos * MOTOR_STEPS_X / (SCREW_X_DU / 10000.0f) / encoderSteps * dupr * starts;
+        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        float screwPitchMicrons = SCREW_X_DU / 10.0f;
+        newPos = (long)(spindlePos * MOTOR_STEPS_X / screwPitchMicrons / encoderSteps * dupr * starts);
     }
     
     // TODO: Implement limit checking when limits are added to MinimalMotionControl
@@ -99,9 +103,13 @@ long OperationManager::spindleFromPos(int axis, long pos) {
     float encoderSteps = ENCODER_PPR * 2.0f;
     
     if (axis == AXIS_Z) {
-        return pos * (SCREW_Z_DU / 10000.0f) * encoderSteps / MOTOR_STEPS_Z / (dupr * starts);
+        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        float screwPitchMicrons = SCREW_Z_DU / 10.0f;
+        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_Z / (dupr * starts));
     } else {
-        return pos * (SCREW_X_DU / 10000.0f) * encoderSteps / MOTOR_STEPS_X / (dupr * starts);
+        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        float screwPitchMicrons = SCREW_X_DU / 10.0f;
+        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_X / (dupr * starts));
     }
 }
 
@@ -289,6 +297,12 @@ void OperationManager::setMode(OperationMode mode) {
         numPasses = 3;
         isInternalOperation = false;  // Default to external
         isLeftToRight = false;        // Default to R→L
+        
+        // Set default feed rate for turning (0.1mm/rev = 1000 deci-microns per revolution)
+        // Sign will be adjusted based on direction when operation starts
+        if (motionControl) {
+            motionControl->setThreadPitch(1000, 1);  // 0.1mm/rev feed rate
+        }
     }
 }
 
@@ -591,6 +605,20 @@ bool OperationManager::startOperation() {
     
     // Save current pitch for consistency
     opDupr = motionControl->getDupr();
+    
+    // For TURN mode, adjust dupr sign based on direction
+    if (currentMode == MODE_TURN && opDupr != 0) {
+        // Ensure dupr sign matches the desired direction
+        // Right-to-left (default) needs negative dupr, left-to-right needs positive
+        if (isLeftToRight && opDupr < 0) {
+            opDupr = -opDupr;
+            motionControl->setThreadPitch(opDupr, motionControl->getStarts());
+        } else if (!isLeftToRight && opDupr > 0) {
+            opDupr = -opDupr;
+            motionControl->setThreadPitch(opDupr, motionControl->getStarts());
+        }
+    }
+    
     opDuprSign = (opDupr >= 0) ? 1 : -1;
     
     // Calculate start offset for multi-start threads
@@ -718,7 +746,15 @@ bool OperationManager::performCuttingPass() {
             {
                 // Calculate target diameter based on pass depth
                 float depthMm = stepsToMm(currentDepth, AXIS_X);
-                float targetDiameter = touchOffXCoord - 2.0f * depthMm;  // Remove material on diameter
+                float targetDiameter;
+                
+                if (isInternalOperation) {
+                    // Internal: diameter increases
+                    targetDiameter = touchOffXCoord + 2.0f * depthMm;
+                } else {
+                    // External: diameter decreases
+                    targetDiameter = touchOffXCoord - 2.0f * depthMm;
+                }
                 
                 // Convert diameter to motor position (X axis moves radially, so divide by 2)
                 targetX = touchOffX + mmToSteps((targetDiameter - touchOffXCoord) / 2.0f, AXIS_X);
@@ -726,7 +762,10 @@ bool OperationManager::performCuttingPass() {
                 
                 // Use h5.ino-style spindle following for Z
                 long spindlePos = motionControl->getSpindlePosition();
-                long deltaZ = posFromSpindle(AXIS_Z, spindlePos - spindleSyncPos, true);
+                long deltaSpindle = spindlePos - spindleSyncPos;
+                
+                // Direction is handled by the sign of dupr
+                long deltaZ = posFromSpindle(AXIS_Z, deltaSpindle, true);
                 targetZ = touchOffZ + deltaZ;
                 
                 // Apply cone ratio if threading (X movement per Z movement)
