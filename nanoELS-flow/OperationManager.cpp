@@ -156,11 +156,11 @@ long OperationManager::numpadToDeciMicrons() {
     }
     
     if (currentMeasure == MEASURE_INCH) {
-        result = result * 25.4;  // Convert to deci-microns (inch * 254000 / 10000)
+        result = result * 25.4;  // With fixed decimal at 1/10000, 10000 = 1.0000" = 254000 deci-microns
     } else if (currentMeasure == MEASURE_TPI) {
         result = round(254000.0 / result);  // TPI to pitch in deci-microns
     } else { // MEASURE_METRIC
-        result = result * 10;  // Convert to deci-microns (mm * 10000 / 1000)
+        result = result * 10;  // With fixed decimal point at 1/1000, 123000 = 123.000mm = 1,230,000 deci-microns
     }
     
     return result;
@@ -183,20 +183,9 @@ String OperationManager::formatDeciMicrons(long deciMicrons, int precisionPoints
     }
     
     bool imperial = currentMeasure != MEASURE_METRIC;
-    long v = imperial ? round(deciMicrons / 25.4) : deciMicrons;
-    int points = 0;
     
-    if (v == 0 && precisionPointsMax >= 5) {
-        points = 5;
-    } else if ((v % 10) != 0 && precisionPointsMax >= 4) {
-        points = 4;
-    } else if ((v % 100) != 0 && precisionPointsMax >= 3) {
-        points = 3;
-    } else if ((v % 1000) != 0 && precisionPointsMax >= 2) {
-        points = 2;
-    } else if ((v % 10000) != 0 && precisionPointsMax >= 1) {
-        points = 1;
-    }
+    // Always show fixed decimal places to match numpad input format
+    int points = imperial ? 4 : 3;  // 4 decimal places for inches, 3 for metric
     
     return String(deciMicrons / (imperial ? 254000.0 : 10000.0), points) + (imperial ? "\"" : "mm");
 }
@@ -251,7 +240,7 @@ String OperationManager::getNumpadDisplayText() {
     
     // Add decimal point based on measurement unit
     if (currentMeasure == MEASURE_METRIC) {
-        // Format as X.XXX mm (3 decimal places)
+        // Format as XXX.XXX mm (3 decimal places, fixed decimal at 1/1000)
         if (display.length() <= 3) {
             display = "0." + String("000").substring(0, 3 - display.length()) + display;
         } else {
@@ -1142,8 +1131,8 @@ String OperationManager::getPromptText() {
     
     // Handle numpad input for parameter setup
     if (inNumpadInput && numpadIndex > 0) {
-        long result = getNumpadResult();
-        return "Use " + formatDeciMicrons(result * (currentMeasure == MEASURE_METRIC ? 10 : 254), 5) + "?";
+        long deciMicrons = numpadToDeciMicrons();
+        return "Use " + formatDeciMicrons(deciMicrons, 5) + "?";
     }
     
     // Fallback to state-based prompts for touch-off and special states

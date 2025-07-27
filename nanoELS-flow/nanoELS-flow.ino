@@ -934,9 +934,9 @@ void taskDisplayUpdate() {
   nextionDisplay.update();
   
   // Update diagnostics display when enabled
-  if (showDiagnostics && splashHandled) {
-    updateDiagnosticsDisplay();
-  }
+  // if (showDiagnostics && splashHandled) {
+  //   updateDiagnosticsDisplay();  // DISABLED - was interfering with t3 operation display
+  // }
   
   // Update operation status display
   if (splashHandled && operationManager.getMode() != MODE_NORMAL) {
