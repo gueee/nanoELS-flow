@@ -325,3 +325,51 @@ Once started, `modeTurn(&z, &x)` executes with:
 - **Modular Rewrite**: Complete rewrite with modular architecture while maintaining h5.ino compatibility
 - **State-Based Operations**: Operations use clear state machines instead of complex setup indices
 - **Clean Interfaces**: Well-defined APIs between modules for maintainability
+
+## Critical Scaling and Display System
+
+### Numpad Input System
+**CRITICAL**: The numpad system uses fixed decimal point positioning:
+- **Metric**: 3 decimal places (123000 = 123.000mm)
+- **Inch**: 4 decimal places (10000 = 1.0000")
+- **TPI**: Whole numbers (8 = 8 TPI)
+
+### Scaling Conversions (OperationManager.cpp)
+**NEVER change these multipliers without understanding the full system:**
+
+```cpp
+// In numpadToDeciMicrons():
+if (currentMeasure == MEASURE_METRIC) {
+    result = result * 10;  // 123000 → 1,230,000 deci-microns (123.000mm)
+} else if (currentMeasure == MEASURE_INCH) {
+    result = result * 25.4;  // 10000 → 254,000 deci-microns (1.0000")
+}
+```
+
+### Display Formatting Rules
+1. **Input Display (t2)**: Shows decimal points during entry
+2. **Confirmation Display (t3)**: Always shows fixed decimal places
+3. **formatDeciMicrons()**: Converts deci-microns back to display format
+
+### Common Scaling Issues
+- **Wrong multiplier**: Using × 10000 instead of × 10 causes 1000× scaling error
+- **Missing decimals**: Display shows "123000" instead of "123.000"
+- **Motion runaway**: Incorrect scaling can cause motors to exceed physical limits
+
+### Touch-off vs Target Storage
+- **Touch-off coordinates**: Stored as float in mm (`touchOffXCoord`, `touchOffZCoord`)
+- **Target values**: Stored as long in deci-microns (`targetDiameter`, `targetZLength`)
+- Display conversion handles this difference automatically
+
+## Nextion Display System
+
+### Display Objects
+- **t0**: Status line (usually mode information)
+- **t1**: Position display (X/Z coordinates)
+- **t2**: Input field (shows values during numpad entry)
+- **t3**: Operation/prompt display (setup prompts, target values)
+
+### Display Update Rules
+- Never write to t3 from diagnostic functions - it interferes with operation display
+- Always terminate Nextion commands with three 0xFF bytes
+- Use `nextionDisplay.showMessage()` wrapper when possible
