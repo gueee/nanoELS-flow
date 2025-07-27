@@ -75,19 +75,23 @@ float OperationManager::stepsToMm(long steps, int axis) const {
 long OperationManager::posFromSpindle(int axis, long spindlePos, bool respectLimits) {
     if (!motionControl) return 0;
     
-    long dupr = motionControl->getDupr();
+    long dupr = motionControl->getDupr();  // In deci-microns per revolution
     int starts = motionControl->getStarts();
     float encoderSteps = ENCODER_PPR * 2.0f; // Quadrature encoding
     
+    // Convert dupr from deci-microns to microns for h5.ino formula compatibility
+    float duprMicrons = dupr / 10.0f;
+    
     long newPos = 0;
     if (axis == AXIS_Z) {
-        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        // Convert screw pitch from deci-microns to microns
         float screwPitchMicrons = SCREW_Z_DU / 10.0f;
-        newPos = (long)(spindlePos * MOTOR_STEPS_Z / screwPitchMicrons / encoderSteps * dupr * starts);
+        // h5.ino formula: s * motorSteps / screwPitch / encoderSteps * dupr * starts
+        newPos = (long)(spindlePos * MOTOR_STEPS_Z / screwPitchMicrons / encoderSteps * duprMicrons * starts);
     } else {
-        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        // Convert screw pitch from deci-microns to microns
         float screwPitchMicrons = SCREW_X_DU / 10.0f;
-        newPos = (long)(spindlePos * MOTOR_STEPS_X / screwPitchMicrons / encoderSteps * dupr * starts);
+        newPos = (long)(spindlePos * MOTOR_STEPS_X / screwPitchMicrons / encoderSteps * duprMicrons * starts);
     }
     
     // TODO: Implement limit checking when limits are added to MinimalMotionControl
@@ -98,18 +102,21 @@ long OperationManager::posFromSpindle(int axis, long spindlePos, bool respectLim
 long OperationManager::spindleFromPos(int axis, long pos) {
     if (!motionControl) return 0;
     
-    long dupr = motionControl->getDupr();
+    long dupr = motionControl->getDupr();  // In deci-microns per revolution
     int starts = motionControl->getStarts();
     float encoderSteps = ENCODER_PPR * 2.0f;
     
+    // Convert dupr from deci-microns to microns for h5.ino formula compatibility
+    float duprMicrons = dupr / 10.0f;
+    
     if (axis == AXIS_Z) {
-        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        // Convert screw pitch from deci-microns to microns
         float screwPitchMicrons = SCREW_Z_DU / 10.0f;
-        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_Z / (dupr * starts));
+        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_Z / (duprMicrons * starts));
     } else {
-        // Convert screw pitch from deci-microns to microns for h5.ino compatibility
+        // Convert screw pitch from deci-microns to microns
         float screwPitchMicrons = SCREW_X_DU / 10.0f;
-        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_X / (dupr * starts));
+        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_X / (duprMicrons * starts));
     }
 }
 
@@ -737,6 +744,7 @@ bool OperationManager::performCuttingPass() {
     // Calculate pass depth (incremental for each pass)
     long currentDepth = (cutDepth * (currentPass + 1)) / numPasses;
     
+    
     // Calculate target positions based on touch-off coordinates
     long targetX, targetZ;
     
@@ -755,6 +763,7 @@ bool OperationManager::performCuttingPass() {
                     // External: diameter decreases
                     targetDiameter = touchOffXCoord - 2.0f * depthMm;
                 }
+                
                 
                 // Convert diameter to motor position (X axis moves radially, so divide by 2)
                 targetX = touchOffX + mmToSteps((targetDiameter - touchOffXCoord) / 2.0f, AXIS_X);
