@@ -79,19 +79,20 @@ long OperationManager::posFromSpindle(int axis, long spindlePos, bool respectLim
     int starts = motionControl->getStarts();
     float encoderSteps = ENCODER_PPR * 2.0f; // Quadrature encoding
     
-    // Convert dupr from deci-microns to microns for h5.ino formula compatibility
-    float duprMicrons = dupr / 10.0f;
+    // Keep dupr in deci-microns and adjust the formula accordingly
+    // Original h5.ino uses microns, we use deci-microns (10x smaller unit)
     
     long newPos = 0;
     if (axis == AXIS_Z) {
-        // Convert screw pitch from deci-microns to microns
-        float screwPitchMicrons = SCREW_Z_DU / 10.0f;
-        // h5.ino formula: s * motorSteps / screwPitch / encoderSteps * dupr * starts
-        newPos = (long)(spindlePos * MOTOR_STEPS_Z / screwPitchMicrons / encoderSteps * duprMicrons * starts);
+        // SCREW_Z_DU is in deci-microns (50000 = 5mm)
+        // dupr is in deci-microns per revolution
+        // Use float to avoid integer division issues
+        float calc = (float)spindlePos * MOTOR_STEPS_Z * dupr * starts / SCREW_Z_DU / encoderSteps;
+        newPos = (long)calc;
     } else {
-        // Convert screw pitch from deci-microns to microns
-        float screwPitchMicrons = SCREW_X_DU / 10.0f;
-        newPos = (long)(spindlePos * MOTOR_STEPS_X / screwPitchMicrons / encoderSteps * duprMicrons * starts);
+        // SCREW_X_DU is in deci-microns (40000 = 4mm)
+        float calc = (float)spindlePos * MOTOR_STEPS_X * dupr * starts / SCREW_X_DU / encoderSteps;
+        newPos = (long)calc;
     }
     
     // TODO: Implement limit checking when limits are added to MinimalMotionControl
@@ -106,17 +107,15 @@ long OperationManager::spindleFromPos(int axis, long pos) {
     int starts = motionControl->getStarts();
     float encoderSteps = ENCODER_PPR * 2.0f;
     
-    // Convert dupr from deci-microns to microns for h5.ino formula compatibility
-    float duprMicrons = dupr / 10.0f;
+    // Keep dupr in deci-microns to match posFromSpindle
     
     if (axis == AXIS_Z) {
-        // Convert screw pitch from deci-microns to microns
-        float screwPitchMicrons = SCREW_Z_DU / 10.0f;
-        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_Z / (duprMicrons * starts));
+        // Inverse of posFromSpindle formula
+        float calc = (float)pos * SCREW_Z_DU * encoderSteps / MOTOR_STEPS_Z / dupr / starts;
+        return (long)calc;
     } else {
-        // Convert screw pitch from deci-microns to microns
-        float screwPitchMicrons = SCREW_X_DU / 10.0f;
-        return (long)(pos * screwPitchMicrons * encoderSteps / MOTOR_STEPS_X / (duprMicrons * starts));
+        float calc = (float)pos * SCREW_X_DU * encoderSteps / MOTOR_STEPS_X / dupr / starts;
+        return (long)calc;
     }
 }
 
