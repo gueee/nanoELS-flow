@@ -1,93 +1,89 @@
-# ⚠️ CRITICAL: Motion Control System Issues
+# ⚠️ CRITICAL: TURN Mode Operation Issues
 
-## ⚠️ **WARNING: MOTION SYSTEM PARTIALLY TESTED**
+## ⚠️ **WARNING: TURN MODE HAS CRITICAL BUGS**
 
-The motion control system has been significantly improved but still needs verification for production use:
+Current status of TURN mode implementation in OperationManager.cpp:
 
-## 🏃 **1. Excessive Speed - Motors Run "As Fast As Possible"**
+## 🚨 **1. Cut Distance Scaling - 60x TOO SMALL**
 
-### Current Speed Settings (SetupConstants.cpp):
+### Current Problem:
+- **User sets**: 123mm cut length
+- **System cuts**: ~2mm actual distance  
+- **Error ratio**: 60x too small
+
+### Root Cause (Under Investigation):
 ```cpp
-const long SPEED_MANUAL_MOVE_Z = 8 * MOTOR_STEPS_Z;  // = 8 * 4000 = 32,000 steps/sec
-const long SPEED_MANUAL_MOVE_X = 8 * MOTOR_STEPS_X;  // = 8 * 4000 = 32,000 steps/sec
+// OperationManager.cpp:788 - Completion check
+if (abs(deltaZ) >= abs(cutLength)) {
+    return true;  // Triggers too early
+}
 ```
 
-### Problems:
-- **32,000 steps/second** is extremely fast for most stepper motors
-- No proper speed ramping (acceleration formula is incorrect)
-- Motors will likely stall, skip steps, or move erratically
-- **Dangerous for actual lathe operations**
+### Suspected Issues:
+- `posFromSpindle()` calculation scaling error
+- Integer division truncation (partially fixed with floating point)
+- Incorrect completion threshold comparison
 
-### Reference (h5.ino working speeds):
-```cpp
-const long SPEED_MANUAL_MOVE_Z = 8 * 800 = 6,400 steps/sec  // 5x slower
-const long SPEED_MANUAL_MOVE_X = 8 * 800 = 6,400 steps/sec  // 5x slower
+## 🔄 **2. Pass Advancement - BROKEN**
+
+### Current Problem:
+- TURN mode stays at "Pass 1/3" 
+- Never advances to Pass 2/3 or 3/3
+- Operation repeats first pass until manually stopped
+
+### Root Cause:
+- Pass completion detection triggers prematurely due to distance scaling issue
+- `performCuttingPass()` returns `true` after ~2mm instead of 123mm
+- Pass advancement logic works correctly, but gets wrong completion signal
+
+## ✅ **3. Working Components**
+
+### Functional Systems:
+- ✅ **TURN mode setup workflow**: Direction, touch-off, targets, passes
+- ✅ **Pitch control**: User can set positive/negative values
+- ✅ **Manual movement**: Arrow keys work when enabled
+- ✅ **Nextion display**: All prompts and status display correctly
+- ✅ **Emergency stop**: ESC key stops operation immediately
+
+## 🔧 **Current Architecture**
+
+### File Structure:
+```
+nanoELS-flow/
+├── nanoELS-flow.ino          # Main application
+├── OperationManager.cpp/.h   # TURN mode implementation
+├── MinimalMotionControl.cpp/.h # Motor control
+├── NextionDisplay.cpp/.h     # Touch screen interface
+├── SetupConstants.cpp/.h     # Hardware configuration
+└── WebInterface.cpp/.h       # HTTP/WebSocket server
 ```
 
-## ✅ **2. Distance Calculations - HARDWARE SPECIFIC (RESOLVED)**
-
-### Current Motor Settings (SetupConstants.cpp):
-```cpp
-const long MOTOR_STEPS_Z = 4000;  // Steps per revolution - CORRECT for this hardware
-const long MOTOR_STEPS_X = 4000;  // Steps per revolution - CORRECT for this hardware
-```
-
-### Status: **RESOLVED**
-- ✅ **Motor steps verified correct** for this specific hardware configuration
-- ✅ **Manual movements tested accurate** - confirms proper calibration
-- ✅ **Target length calculation fixed** - now uses cut distance not target position
-- ⚠️ **Note**: Different from h5.ino reference (800 steps/rev) due to different hardware
-
-### Verification:
-- Manual movement distances: **✅ ACCURATE**
-- Touch-off coordinates: **✅ WORKING**
-- Target calculation: **✅ FIXED** (was treating target as position, now as cut distance)
-
-## 🔧 **3. Acceleration Algorithm Issues**
-
-### Current Code (MinimalMotionControl.cpp:266):
-```cpp
-a.currentSpeed += a.acceleration / a.currentSpeed;  // ❌ INCORRECT FORMULA
-```
-
-### Problems:
-- Mathematically incorrect acceleration curve
-- Can cause divide-by-zero or erratic behavior
-- No proper deceleration control
+### Key Functions (OperationManager.cpp):
+- `posFromSpindle()` - Line 75: Spindle to motor step conversion
+- `performCuttingPass()` - Line 743: Cut execution and completion check
+- `executeTurnMode()` - Line 930: Pass state machine
 
 ## 🛠️ **Required Fixes**
 
-### Immediate Actions Needed:
-1. **Fix motor step constants** to match actual hardware
-2. **Reduce maximum speeds** to safe levels
-3. **Fix acceleration algorithm** using proper physics
-4. **Add speed limiting** and validation
-5. **Calibrate distance calculations** with real measurements
+### Priority 1 - Critical:
+1. **Fix distance scaling**: Identify why 123mm → 2mm
+2. **Fix pass advancement**: Ensure proper completion detection
 
-### Safety Recommendations:
-- **DO NOT USE** for actual machining until fixed
-- Test with **NO WORKPIECE** and manual observation only
-- Keep **emergency stop** readily accessible
-- Verify all distances with measurement tools
+### Investigation Needed:
+- Verify `cutLength` calculation (should be 98,400 steps for 123mm)
+- Check `deltaZ` values from `posFromSpindle()`
+- Analyze completion condition `abs(deltaZ) >= abs(cutLength)`
 
-## 📋 **Testing Status**
+## ⚠️ **Testing Status**
 
-- ✅ **Workflow Logic**: TURN mode setup works correctly
-- ✅ **User Interface**: Touch-off, target entry, operation start
-- ✅ **Distance Calculations**: Verified accurate for this hardware
-- ✅ **Target Length Fix**: Now uses cut distance (not target position)
-- ✅ **Manual Movement Control**: Properly disabled during setup
-- ⚠️ **Motion Control Speeds**: May still need verification for high-speed operations
-- ⚠️ **Acceleration Algorithm**: Needs review for production use
-
-## 🔗 **Related Issues**
-
-See GitHub issues for tracking motion control fixes:
-- [ ] Issue #X: Fix excessive motion speeds
-- [ ] Issue #Y: Correct distance/step calculations  
-- [ ] Issue #Z: Implement proper acceleration curves
+- ✅ **Setup workflow**: Complete and functional
+- ✅ **User interface**: All prompts work correctly  
+- ✅ **Manual operations**: Arrow keys, touch-off working
+- ❌ **Cut distance**: 60x scaling error
+- ❌ **Pass progression**: Stuck at first pass
+- ❌ **Operation completion**: Premature termination
 
 ---
 
-**Last Updated**: 2025-07-26  
-**Status**: ⚠️ **PARTIAL - BASIC OPERATIONS WORKING, VERIFY BEFORE PRODUCTION USE** ⚠️
+**Last Updated**: 2025-07-28  
+**Status**: ⚠️ **CRITICAL BUGS - DISTANCE & PASS ADVANCEMENT BROKEN** ⚠️
