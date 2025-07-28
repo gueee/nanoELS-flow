@@ -786,6 +786,11 @@ bool OperationManager::performCuttingPass() {
                 
                 // Check if we've reached the cut length
                 if (abs(deltaZ) >= abs(cutLength)) {
+                    // TEMP DEBUG: Show values when cut completes
+                    Serial.print("CUT COMPLETE: deltaZ=");
+                    Serial.print(deltaZ);
+                    Serial.print(" cutLength=");
+                    Serial.println(cutLength);
                     return true;
                 }
             }
