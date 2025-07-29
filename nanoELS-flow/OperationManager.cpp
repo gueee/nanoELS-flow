@@ -290,6 +290,26 @@ void OperationManager::setMode(OperationMode mode) {
         isInternalOperation = false;  // Default to external
         isLeftToRight = false;        // Default to R→L
     }
+    
+    // Reset workflow-specific values for threading mode
+    if (mode == MODE_THREAD) {
+        // Clear previous touch-off values
+        clearTouchOff();
+        // Clear targets
+        clearTargets();
+        // Clear parking position
+        clearParkingPosition();
+        // Reset numpad
+        resetNumpad();
+        // Default values
+        numPasses = 3;
+        isInternalOperation = false;  // Default to external
+        isLeftToRight = false;        // Default to R→L
+        // Set default starts to 1 (single-start thread)
+        if (motionControl) {
+            motionControl->setStarts(1);
+        }
+    }
 }
 
 void OperationManager::startTouchOffX() {
@@ -338,6 +358,12 @@ void OperationManager::handleNumpadInput(char digit) {
     if (digit >= '0' && digit <= '9') {
         // Enable numpad input for turn mode passes entry (setupIndex 1 and 4)
         if (currentMode == MODE_TURN && (setupIndex == 1 || setupIndex == 4) && !inNumpadInput) {
+            inNumpadInput = true;
+            numpadIndex = 0;
+        }
+        
+        // Enable numpad input for threading mode starts and passes entry (setupIndex 1, 4, and 5)
+        if (currentMode == MODE_THREAD && (setupIndex == 1 || setupIndex == 4 || setupIndex == 5) && !inNumpadInput) {
             inNumpadInput = true;
             numpadIndex = 0;
         }
@@ -406,6 +432,10 @@ void OperationManager::confirmParameterValue() {
             setNumPassesFromNumpad();
             break;
             
+        case STATE_SETUP_STARTS:
+            setStartsFromNumpad();
+            break;
+            
         case STATE_SETUP_CONE:
             setConeRatioFromNumpad();
             break;
@@ -422,6 +452,7 @@ bool OperationManager::isInParameterEntry() const {
     return inNumpadInput && (currentState == STATE_TARGET_DIAMETER ||
                            currentState == STATE_TARGET_LENGTH || 
                            currentState == STATE_SETUP_PASSES || 
+                           currentState == STATE_SETUP_STARTS ||
                            currentState == STATE_SETUP_CONE ||
                            currentState == STATE_TOUCHOFF_X ||
                            currentState == STATE_TOUCHOFF_Z);
@@ -451,6 +482,15 @@ void OperationManager::setConeRatioFromNumpad() {
     setConeRatio(ratio);
 }
 
+void OperationManager::setStartsFromNumpad() {
+    // Number of starts is entered as a simple integer
+    long result = getNumpadResult();
+    int starts = max(1, min((int)result, 99)); // Limit to reasonable range (1-99)
+    if (motionControl) {
+        motionControl->setStarts(starts);
+    }
+}
+
 void OperationManager::setCutLength(float mm) {
     cutLength = mmToSteps(mm, AXIS_Z);
 }
@@ -475,6 +515,7 @@ void OperationManager::nextSetupStep() {
     // If in parameter entry, just return - parameters advance setup automatically
     if (inNumpadInput && (currentState == STATE_TARGET_LENGTH || 
                          currentState == STATE_SETUP_PASSES || 
+                         currentState == STATE_SETUP_STARTS ||
                          currentState == STATE_SETUP_CONE)) {
         return;
     }
@@ -517,10 +558,13 @@ void OperationManager::nextSetupStep() {
                     startParameterEntry(STATE_TARGET_LENGTH);  // Start numpad entry
                     break;
                 case STATE_TARGET_LENGTH:
-                    startParameterEntry(STATE_SETUP_PASSES);  // Start numpad entry
+                    startParameterEntry(STATE_SETUP_STARTS);   // Start numpad entry for starts
+                    break;
+                case STATE_SETUP_STARTS:
+                    startParameterEntry(STATE_SETUP_PASSES);   // Start numpad entry for passes
                     break;
                 case STATE_SETUP_PASSES:
-                    startParameterEntry(STATE_SETUP_CONE);    // Start numpad entry
+                    startParameterEntry(STATE_SETUP_CONE);     // Start numpad entry for cone ratio
                     break;
                 case STATE_SETUP_CONE:
                     currentState = STATE_READY;
@@ -552,16 +596,29 @@ void OperationManager::nextSetupStep() {
 void OperationManager::previousSetupStep() {
     switch (currentState) {
         case STATE_READY:
-            if (currentMode == MODE_THREAD || currentMode == MODE_CONE) {
+            if (currentMode == MODE_THREAD) {
+                currentState = STATE_SETUP_CONE;
+            } else if (currentMode == MODE_CONE) {
                 currentState = STATE_SETUP_CONE;
             } else {
                 currentState = STATE_SETUP_PASSES;
             }
             break;
         case STATE_SETUP_CONE:
-            currentState = STATE_SETUP_PASSES;
+            if (currentMode == MODE_THREAD) {
+                currentState = STATE_SETUP_PASSES;
+            } else {
+                currentState = STATE_SETUP_PASSES;
+            }
             break;
         case STATE_SETUP_PASSES:
+            if (currentMode == MODE_THREAD) {
+                currentState = STATE_SETUP_STARTS;
+            } else {
+                currentState = STATE_TARGET_LENGTH;
+            }
+            break;
+        case STATE_SETUP_STARTS:
             currentState = STATE_TARGET_LENGTH;
             break;
         case STATE_TARGET_LENGTH:
@@ -1112,6 +1169,70 @@ String OperationManager::getPromptText() {
         }
     }
     
+    // Threading mode workflow - exact copy of turning but with starts prompt
+    if (currentMode == MODE_THREAD) {
+        switch (setupIndex) {
+            case 0:  // Step 1: Direction selection
+                {
+                    String direction = isLeftToRight ? "L→R" : "R→L";
+                    String type = isInternalOperation ? "INT" : "EXT";
+                    return direction + " " + type + " ←→↑↓";
+                }
+            
+            case 1:  // Step 2: Touch-off both axes (any order)
+                if (currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
+                    return getTouchOffDisplayText();
+                }
+                if (touchOffXValid && touchOffZValid) {
+                    // Both values confirmed, show them and prompt to continue
+                    return "X" + formatDeciMicrons(touchOffXCoord * 10000, 1) + " Z" + formatDeciMicrons(touchOffZCoord * 10000, 1);
+                }
+                return "Touch off";
+            
+            case 2:  // Step 3: Move to parking position
+                return "Move to parking pos";
+            
+            case 3:  // Step 4: Set target diameter and length
+                if (currentState == STATE_TARGET_DIAMETER) {
+                    if (inNumpadInput && numpadIndex > 0) {
+                        return "X:" + getNumpadDisplayText();
+                    }
+                    return "Target X (final)";
+                } else if (currentState == STATE_TARGET_LENGTH) {
+                    if (inNumpadInput && numpadIndex > 0) {
+                        return "L:" + getNumpadDisplayText();
+                    }
+                    return "Cut length";
+                } else {
+                    // Show current values if set
+                    if (targetDiameter > 0 && targetZLength > 0) {
+                        return "X" + formatDeciMicrons(targetDiameter, 1) + " L" + formatDeciMicrons(targetZLength, 1);
+                    } else if (targetDiameter > 0) {
+                        return "X" + formatDeciMicrons(targetDiameter, 1) + " →L?";
+                    } else {
+                        return "Set target X & L";
+                    }
+                }
+            
+            case 4:  // Step 5: Set number of starts
+                if (inNumpadInput && numpadIndex > 0) {
+                    long starts = getNumpadResult();
+                    return String(starts) + " starts";
+                }
+                return String(motionControl->getStarts()) + " starts";
+            
+            case 5:  // Step 6: Set number of passes
+                if (inNumpadInput && numpadIndex > 0) {
+                    long passes = getNumpadResult();
+                    return String(passes) + " passes";
+                }
+                return String(numPasses) + " passes";
+            
+            default:
+                return "Ready";
+        }
+    }
+    
     // Handle other modes
     if (isPassMode()) {
         // Other pass modes can use similar structure
@@ -1428,7 +1549,7 @@ int OperationManager::getLastSetupIndex() const {
         case MODE_GCODE:
             return 2;
         case MODE_THREAD:
-            return 4;
+            return 5;  // Threading mode workflow: 6 steps (0-5) - same as turning but with starts prompt
         case MODE_TURN:
         case MODE_FACE:
         case MODE_CUT:

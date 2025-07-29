@@ -98,26 +98,41 @@ The application follows a modular architecture inspired by h5.ino proven algorit
 ## Development Commands
 
 ### Build and Upload (Arduino IDE - Primary)
-```bash
-# Arduino IDE 2.3.6+
-# Board: ESP32S3 Dev Module
-# Upload Speed: 921600
-# Flash Size: 16MB
-# Partition: Huge APP (3MB No OTA/1MB SPIFFS)
-# USB CDC On Boot: Enabled
-# CPU Frequency: 240MHz (WiFi/BT)
-# Flash Mode: QIO
-# PSRAM: OPI PSRAM (if available)
-```
+**CRITICAL**: Arduino IDE 2.3.6+ is the ONLY supported development environment.
+
+**Board Configuration in Arduino IDE:**
+- Board: "ESP32S3 Dev Module"
+- Upload Speed: 921600
+- Flash Size: 16MB
+- Partition Scheme: "Huge APP (3MB No OTA/1MB SPIFFS)"
+- USB CDC On Boot: Enabled
+- CPU Frequency: 240MHz (WiFi/BT)
+- Flash Mode: QIO
+- Flash Frequency: 80MHz
+- PSRAM: "OPI PSRAM" (if available)
+- Arduino Runs On: Core 1
+- Events Runs On: Core 1
+
+**Upload Process:**
+1. Connect ESP32-S3-dev board via USB
+2. Select correct port (usually /dev/ttyUSB0 on Linux)
+3. Press Upload button in Arduino IDE
+4. Monitor Serial output at 115200 baud for startup messages
 
 ### Build Testing with arduino-cli (Optional)
 ```bash
 # Test compilation without opening IDE
-arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc nanoELS-flow/
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashMode=qio,FlashSize=16M,PartitionScheme=huge_app,PSRAM=opi nanoELS-flow/
 
 # Upload if compilation succeeds
 arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32s3 nanoELS-flow/
 ```
+
+### Common Build Issues and Solutions
+- **Upload fails**: Press and hold BOOT button during upload, or use ESP Download Tool
+- **PSRAM errors**: Ensure "OPI PSRAM" is selected in board settings
+- **Library missing**: Install WebSockets and PS2KeyAdvanced via Library Manager
+- **Port not found**: Check USB cable and driver installation for CH340/CP2102
 
 ### Hardware Configuration
 Edit motion parameters in `SetupConstants.cpp`:
@@ -325,3 +340,68 @@ Once started, `modeTurn(&z, &x)` executes with:
 - **Modular Rewrite**: Complete rewrite with modular architecture while maintaining h5.ino compatibility
 - **State-Based Operations**: Operations use clear state machines instead of complex setup indices
 - **Clean Interfaces**: Well-defined APIs between modules for maintainability
+
+## Task Scheduler Architecture
+
+### Non-Blocking State Machine
+The project uses a priority-based task scheduler (`StateMachine.h/.cpp`) that runs tasks without blocking:
+
+```cpp
+// Task priorities and frequencies
+scheduler.addTask("EmergencyCheck", taskEmergencyCheck, PRIORITY_CRITICAL, 0);    // Every loop
+scheduler.addTask("KeyboardScan", taskKeyboardScan, PRIORITY_CRITICAL, 0);        // Every loop  
+scheduler.addTask("MotionUpdate", taskMotionUpdate, PRIORITY_CRITICAL, 0);        // Every loop
+scheduler.addTask("OperationUpdate", taskOperationUpdate, PRIORITY_CRITICAL, 0);  // Every loop
+scheduler.addTask("DisplayUpdate", taskDisplayUpdate, PRIORITY_NORMAL, 50);       // 20Hz
+scheduler.addTask("WebUpdate", taskWebUpdate, PRIORITY_NORMAL, 20);               // 50Hz
+scheduler.addTask("Diagnostics", taskDiagnostics, PRIORITY_LOW, 5000);            // 0.2Hz
+```
+
+### Emergency Stop Response Time
+- **Target**: <15ms response time
+- **Implementation**: Emergency stop checking runs every loop iteration
+- **Safety**: All movement functions check emergency state before executing
+
+## Current Known Issues
+
+### TURN Mode Distance Scaling (CRITICAL)
+Based on `PROJECT_PROGRESS.md`, there are critical scaling issues:
+
+- **Problem**: Cut distances are 60x too small (123mm becomes ~2mm)
+- **Root Cause**: Incorrect scaling multipliers in `OperationManager.cpp`
+- **Impact**: Operations complete prematurely, pass advancement broken
+
+**DO NOT modify these scaling constants without understanding the full system:**
+```cpp
+// In numpadToDeciMicrons():
+if (currentMeasure == MEASURE_METRIC) {
+    result = result * 10;  // CRITICAL: This scaling affects all operations
+}
+```
+
+### Pass Management Issues
+- Pass counter stays at "Pass 1/3", never advances
+- Related to premature completion due to distance scaling
+- Operation repeats first pass until manually stopped
+
+## Development Workflow Patterns
+
+### State-Based Operations
+All complex operations follow this pattern:
+1. **Setup States**: Direction, touch-off coordinates, parameters
+2. **Validation**: Check all required inputs before starting
+3. **Execution**: Multi-pass operations with progress tracking
+4. **Safety Integration**: Emergency stop checks throughout
+
+### Keyboard Event Processing
+Keyboard handling follows h5.ino patterns with modern enhancements:
+- **Priority**: Emergency stop (ESC) processed immediately
+- **Context-Aware**: Arrow keys work differently in setup vs manual mode
+- **Numpad Integration**: Number keys automatically enter coordinate/parameter entry mode
+- **State Management**: Keys enable/disable based on current operation state
+
+### Memory and Performance Constraints
+- **Target Loop Frequency**: ~100kHz for motion control
+- **No Blocking Operations**: All delays and waits must be non-blocking
+- **Minimal Memory Footprint**: Core motion structures optimized for size
+- **Real-time Priority**: Motion control and safety systems have highest priority

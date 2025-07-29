@@ -501,6 +501,80 @@ void processKeypadEvent() {
                 }
                 break;
             }
+          } else if (operationManager.getMode() == MODE_THREAD) {
+            // Threading mode specific workflow - exact copy of turning but with starts prompt
+            switch (setupIndex) {
+              case 0:  // Step 1: Confirm direction selection
+                operationManager.advanceSetupIndex();
+                // Touch-off will be started when user presses appropriate key (d/s for External R-L)
+                break;
+              
+              case 1:  // Step 2: Touch-off both axes (any order)
+                // ENTER only confirms value and advances if touch-off was started AND numpad entry is complete
+                {
+                  OperationState currentState = operationManager.getState();
+                  if (currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
+                    // Check if user has entered coordinate value via numpad
+                    if (operationManager.isInNumpadInput() && operationManager.getNumpadResult() > 0) {
+                      operationManager.confirmTouchOffValue();
+                      // Only advance setupIndex when BOTH touch-offs are complete
+                      if (operationManager.hasTouchOffX() && operationManager.hasTouchOffZ()) {
+                        operationManager.advanceSetupIndex();  // Go to parking setup
+                      }
+                      // If only one touch-off complete, stay at setupIndex 1 for second touch-off
+                    }
+                    // If no numpad input yet, do nothing - user must enter coordinate value first
+                  } else if (operationManager.hasTouchOffX() && operationManager.hasTouchOffZ()) {
+                    // Both touch-offs complete but not in active touch-off state - advance to parking
+                    operationManager.advanceSetupIndex();
+                  }
+                  // If no touch-off started, do nothing - user must press d/s first
+                }
+                break;
+              
+              case 2:  // Step 3: Confirm parking position
+                operationManager.setParkingPosition(
+                  motionControl.getAxisPosition(AXIS_X),
+                  motionControl.getAxisPosition(AXIS_Z)
+                );
+                operationManager.advanceSetupIndex();
+                // Directly start target diameter entry - skip useless intermediate step
+                operationManager.startTargetDiameterEntry();
+                break;
+              
+              case 3:  // Step 4: Target diameter and length entry
+                // Handle transition from diameter to length entry
+                if (operationManager.hasTargetDiameter() && !operationManager.hasTargetLength()) {
+                  operationManager.startTargetLengthEntry();
+                } else if (operationManager.hasTargetDiameter() && operationManager.hasTargetLength()) {
+                  operationManager.advanceSetupIndex();
+                }
+                break;
+              
+              case 4:  // Step 5: Confirm number of starts - handled in numpad branch above
+                // Fallback: if not in numpad input mode, just advance (accept default)
+                if (operationManager.getNumpadResult() > 0) {
+                  motionControl.setStarts(operationManager.getNumpadResult());
+                }
+                operationManager.resetNumpad();
+                operationManager.advanceSetupIndex();
+                break;
+              
+              case 5:  // Step 6: Confirm number of passes - handled in numpad branch above
+                // Fallback: if not in numpad input mode, just advance (accept default)
+                operationManager.advanceSetupIndex();
+                break;
+              
+              default:  // Step 7: Start operation
+                if (operationManager.startOperation()) {
+                  nextionDisplay.showMessage("Operation started");
+                  return;  // Exit to prevent prompt overwrite
+                } else {
+                  nextionDisplay.showMessage("Cannot start - check setup");
+                  return;  // Exit to show error message
+                }
+                break;
+            }
           } else {
             // Other modes - original progression logic
             if (!isOn && setupIndex == 0) {
@@ -773,7 +847,7 @@ void processKeypadEvent() {
       
     // Touch-off keys - User moves axes then presses these to CONFIRM touch-off position
     case B_STOPU:   // 'w' - Confirm INTERNAL diameter touch-off position
-      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+      if (!motionControl.getEmergencyStop() && (operationManager.getMode() == MODE_TURN || operationManager.getMode() == MODE_THREAD)) {
         int setupIndex = operationManager.getSetupIndex();
         if (setupIndex == 1 && operationManager.getInternalOperation()) {
           // Internal operation: 'w' confirms X-axis (diameter) touch-off
@@ -784,7 +858,7 @@ void processKeypadEvent() {
       break;
       
     case B_STOPD:   // 's' - Confirm EXTERNAL diameter touch-off position  
-      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+      if (!motionControl.getEmergencyStop() && (operationManager.getMode() == MODE_TURN || operationManager.getMode() == MODE_THREAD)) {
         int setupIndex = operationManager.getSetupIndex();
         if (setupIndex == 1 && !operationManager.getInternalOperation()) {
           // External operation: 's' confirms X-axis (diameter) touch-off and advances to value input
@@ -796,7 +870,7 @@ void processKeypadEvent() {
       break;
       
     case B_STOPR:   // 'd' - Confirm R→L face/Z touch-off position
-      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+      if (!motionControl.getEmergencyStop() && (operationManager.getMode() == MODE_TURN || operationManager.getMode() == MODE_THREAD)) {
         int setupIndex = operationManager.getSetupIndex();
         if (setupIndex == 1 && !operationManager.getLeftToRight()) {
           // R→L operation: 'd' confirms Z-axis (face) touch-off and advances to value input
@@ -808,7 +882,7 @@ void processKeypadEvent() {
       break;
       
     case B_STOPL:   // 'a' - Confirm L→R face/Z touch-off position
-      if (!motionControl.getEmergencyStop() && operationManager.getMode() == MODE_TURN) {
+      if (!motionControl.getEmergencyStop() && (operationManager.getMode() == MODE_TURN || operationManager.getMode() == MODE_THREAD)) {
         int setupIndex = operationManager.getSetupIndex();
         if (setupIndex == 1 && operationManager.getLeftToRight()) {
           // L→R operation: 'a' confirms Z-axis (face) touch-off
@@ -833,6 +907,7 @@ void processKeypadEvent() {
         bool isInNumpad = operationManager.isInNumpadInput();
         bool isInParam = operationManager.isInParameterEntry();
         bool isTurnMode = operationManager.getMode() == MODE_TURN;
+        bool isThreadMode = operationManager.getMode() == MODE_THREAD;
         int setupIdx = operationManager.getSetupIndex();
         char digit;
         // Map keyCode to digit character for top row numbers
@@ -850,8 +925,8 @@ void processKeypadEvent() {
           default: digit = '0'; break; // Fallback
         }
         
-        if (isInNumpad || isInParam || (isTurnMode && (setupIdx == 1 || setupIdx == 4))) {
-          // Allow number entry for turn mode passes setup
+        if (isInNumpad || isInParam || (isTurnMode && (setupIdx == 1 || setupIdx == 4)) || (isThreadMode && (setupIdx == 1 || setupIdx == 4 || setupIdx == 5))) {
+          // Allow number entry for turn mode passes setup and threading mode starts/passes setup
           operationManager.handleNumpadInput(digit);
           nextionDisplay.showMessage(operationManager.getPromptText());
         }

@@ -49,6 +49,7 @@ enum OperationState {
     STATE_TARGET_DIAMETER,  // Setting target diameter via numpad
     STATE_TARGET_LENGTH,    // Setting target length via numpad
     STATE_SETUP_PASSES,     // Setting number of passes
+    STATE_SETUP_STARTS,     // Setting number of starts (threading mode)
     STATE_SETUP_CONE,       // Setting cone ratio (thread mode only)
     STATE_READY,            // Ready to start operation
     STATE_RUNNING,          // Operation in progress
@@ -253,6 +254,7 @@ public:
     void setCutDepthFromNumpad();    // Set cut depth from current numpad value  
     void setNumPassesFromNumpad();   // Set passes from current numpad value
     void setConeRatioFromNumpad();   // Set cone ratio from current numpad value
+    void setStartsFromNumpad();      // Set starts from current numpad value
     
     // Operation control
     bool startOperation();    // Start the current operation
