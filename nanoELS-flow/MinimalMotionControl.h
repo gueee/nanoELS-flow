@@ -151,6 +151,7 @@ public:
     void startThreading();
     void stopThreading();
     bool isThreadingActive() { return spindle.threadingActive; }
+    bool isPitchChangeAllowed() { return !spindle.threadingActive; }  // Safety check for pitch changes
     
     // Axis control
     void enableAxis(int axis);

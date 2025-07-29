@@ -721,6 +721,12 @@ void processKeypadEvent() {
     case B_PLUS:   // Numpad plus - increment pitch or parameters
       // Pitch adjustment always works (user requirement)
       if (!operationManager.isInNumpadInput()) {
+        // Safety check: Prevent pitch changes during threading operations
+        if (!operationManager.isPitchChangeAllowed()) {
+          nextionDisplay.showMessage("Pitch locked during threading!");
+          break;
+        }
+        
         // Increment pitch by small amount (like h5.ino)
         long currentDupr = motionControl.getDupr();  // Get current pitch
         long delta = (operationManager.getCurrentMeasure() == MEASURE_METRIC) ? 100 : 254; // 0.01mm or 0.001"
@@ -761,6 +767,12 @@ void processKeypadEvent() {
     case B_MINUS:  // Numpad minus - decrement pitch or parameters  
       // Pitch adjustment always works (user requirement)
       if (!operationManager.isInNumpadInput()) {
+        // Safety check: Prevent pitch changes during threading operations
+        if (!operationManager.isPitchChangeAllowed()) {
+          nextionDisplay.showMessage("Pitch locked during threading!");
+          break;
+        }
+        
         // Decrement pitch by small amount (like h5.ino)
         long currentDupr = motionControl.getDupr();  // Get current pitch
         long delta = (operationManager.getCurrentMeasure() == MEASURE_METRIC) ? 100 : 254; // 0.01mm or 0.001"

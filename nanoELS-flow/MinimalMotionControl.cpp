@@ -328,6 +328,12 @@ void MinimalMotionControl::stopAllAxes() {
 
 // Threading control
 void MinimalMotionControl::setThreadPitch(int32_t dupr, int32_t starts) {
+    // Safety check: Prevent pitch changes during active threading operations
+    if (spindle.threadingActive) {
+        // Pitch is locked during threading - ignore the change
+        return;
+    }
+    
     spindle.threadPitch = dupr;
     spindle.threadStarts = starts;
 }

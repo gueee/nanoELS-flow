@@ -286,6 +286,9 @@ public:
     int getCurrentPass() const { return currentPass; }
     int getTotalPasses() const { return numPasses; }
     
+    // Safety checks
+    bool isPitchChangeAllowed() const;  // Check if pitch changes are allowed (not during threading)
+    
     // Operation parameter getters
     float getCutLengthMm() const { return stepsToMm(cutLength, 1); }  // Z axis
     float getCutDepthMm() const { return stepsToMm(cutDepth, 0); }    // X axis

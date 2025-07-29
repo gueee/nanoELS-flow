@@ -181,6 +181,12 @@ void NextionDisplay::showMotionStatus() {
   if (starts != 1) {
     pitchLine += " x" + String(starts);
   }
+  
+  // Add pitch lock indicator for threading operations
+  if (motionControl.isThreadingActive()) {
+    pitchLine += " LOCKED";
+  }
+  
   setPitchLine(pitchLine);
   
   // Position line: Axis positions (matching original format "Z:xxx.xx X:xxx.xx")

@@ -1585,3 +1585,13 @@ void OperationManager::advanceSetupIndex() {
 bool OperationManager::isSetupComplete() const {
     return setupIndex >= getLastSetupIndex();
 }
+
+bool OperationManager::isPitchChangeAllowed() const {
+    // Pitch changes are not allowed during active threading operations
+    if (currentMode == MODE_THREAD && currentState == STATE_RUNNING) {
+        return false;
+    }
+    
+    // Pitch changes are allowed in all other cases
+    return true;
+}
