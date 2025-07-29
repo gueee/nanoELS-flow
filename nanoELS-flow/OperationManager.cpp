@@ -1819,11 +1819,10 @@ void OperationManager::nextCuttingParamsStep() {
             break;
         case STATE_CUTTING_PARAMS_DIAMETER:
             if (inNumpadInput && numpadIndex > 0) {
-                // Convert numpad result to diameter
-                float diameter = getNumpadResult() / 1000.0f; // Convert from deci-microns to mm
-                if (currentMeasure == MEASURE_INCH || currentMeasure == MEASURE_TPI) {
-                    diameter = diameter / 25.4f; // Convert mm to inches
-                }
+                // Convert numpad result using standard pattern (like all other inputs)
+                long diameterDeciMicrons = numpadToDeciMicrons();
+                // Convert deci-microns to mm for cutting parameters
+                float diameter = diameterDeciMicrons / 10000.0f; // Convert deci-microns to mm
                 setCuttingParamsDiameter(diameter);
                 resetNumpad();
                 inNumpadInput = false;
