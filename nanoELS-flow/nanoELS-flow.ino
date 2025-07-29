@@ -125,10 +125,7 @@ const char* AP_PASSWORD = "nanoels123";
 // Function Prototypes
 // ==================
 void initializeWebInterface();  // Web interface initialization
-void handleKeyboard();  // Basic keyboard handling
 void processKeypadEvent();  // Enhanced PS2 keyboard processing
-void checkEmergencyStop();  // Immediate emergency stop check
-void updateDisplay();   // Display update placeholder
 
 // Manual movement functions
 void performManualMovement(int keyCode);      // Simple manual movement
@@ -136,7 +133,6 @@ void resetArrowKeyStates();                   // Reset all key states (for emerg
 
 // Task functions for scheduler
 void taskEmergencyCheck();
-void taskKeyboardScan();
 void taskMotionUpdate();
 void taskOperationUpdate();
 void taskDisplayUpdate();
@@ -213,7 +209,7 @@ void setup() {
   
   // Add tasks in priority order
   scheduler.addTask("EmergencyCheck", taskEmergencyCheck, PRIORITY_CRITICAL, 0);  // Every loop
-  scheduler.addTask("KeyboardScan", taskKeyboardScan, PRIORITY_CRITICAL, 0);      // Every loop
+  scheduler.addTask("KeyboardScan", processKeypadEvent, PRIORITY_CRITICAL, 0);      // Every loop
   scheduler.addTask("MotionUpdate", taskMotionUpdate, PRIORITY_CRITICAL, 0);      // Every loop (~100kHz)
   scheduler.addTask("OperationUpdate", taskOperationUpdate, PRIORITY_CRITICAL, 0); // Every loop for operations
   scheduler.addTask("DisplayUpdate", taskDisplayUpdate, PRIORITY_NORMAL, 50);     // 20Hz
@@ -872,23 +868,8 @@ void processKeypadEvent() {
   }
 }
 
-// Wrapper function for compatibility
-void handleKeyboard() {
-  processKeypadEvent();
-}
-
 // Note: Enhanced keyboard processing via processKeypadEvent() 
 // is now integrated with the existing scheduler system
-
-void checkEmergencyStop() {
-  // Legacy function - now handled by state machine
-  // Kept for compatibility
-  // Real emergency check is in taskEmergencyCheck() running every loop
-}
-
-void updateDisplay() {
-  // Display update placeholder - handled by NextionDisplay.update() in main loop
-}
 
 // Task implementations for scheduler
 // ==================================
@@ -911,10 +892,7 @@ void taskEmergencyCheck() {
   }
 }
 
-void taskKeyboardScan() {
-  // Full keyboard handling - runs every loop for safety
-  handleKeyboard();
-}
+
 
 void taskMotionUpdate() {
   // Motion control update - runs at 1kHz

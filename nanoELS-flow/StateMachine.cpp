@@ -247,9 +247,9 @@ void SystemStateMachine::handleEmergencyCheck() {
 }
 
 void SystemStateMachine::handleKeyboardScan() {
-    // Full keyboard handling
-    extern void handleKeyboard();
-    handleKeyboard();
+    // Full keyboard handling - now calls processKeypadEvent directly
+    extern void processKeypadEvent();
+    processKeypadEvent();
 }
 
 void SystemStateMachine::handleMotionUpdate() {
