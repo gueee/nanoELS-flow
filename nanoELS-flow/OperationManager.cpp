@@ -690,8 +690,8 @@ bool OperationManager::waitForSpindleSync() {
     long currentSpindlePos = motionControl->getSpindlePosition();
     long spindleDiff = currentSpindlePos - spindleSyncPos;
     
-    // Add start offset for multi-start threads
-    if (currentPass > 0 && motionControl->getStarts() > 1) {
+    // Add start offset for multi-start threads (only for threading mode)
+    if (currentMode == MODE_THREAD && currentPass > 0 && motionControl->getStarts() > 1) {
         spindleDiff -= startOffset * currentPass;
     }
     
