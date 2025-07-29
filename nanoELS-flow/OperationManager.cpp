@@ -174,6 +174,25 @@ void OperationManager::cycleMeasure() {
     } else {
         currentMeasure = MEASURE_METRIC;
     }
+    
+    // Update pitch based on new measurement unit if in threading mode
+    if (currentMode == MODE_THREAD && motionControl) {
+        // Use touch-off diameter if available, otherwise use default
+        float diameter = 10.0f;  // Default 10mm
+        if (currentMeasure == MEASURE_INCH || currentMeasure == MEASURE_TPI) {
+            diameter = 0.4f;  // Default 0.4"
+        }
+        
+        if (touchOffXValid) {
+            diameter = touchOffXCoord;  // Use actual touch-off diameter
+        }
+        
+        // Only update if pitch is not locked
+        if (isPitchChangeAllowed()) {
+            long defaultPitch = getDefaultPitchForDiameter(diameter, currentMeasure);
+            motionControl->setThreadPitch(defaultPitch);
+        }
+    }
 }
 
 // h5.ino-style formatting functions
@@ -308,6 +327,16 @@ void OperationManager::setMode(OperationMode mode) {
         // Set default starts to 1 (single-start thread)
         if (motionControl) {
             motionControl->setStarts(1);
+            
+            // Set intelligent default pitch based on current measurement unit
+            // Use a reasonable default diameter (10mm or 0.4") if no touch-off is set
+            float defaultDiameter = 10.0f;  // 10mm default
+            if (currentMeasure == MEASURE_INCH || currentMeasure == MEASURE_TPI) {
+                defaultDiameter = 0.4f;  // 0.4" default for imperial
+            }
+            
+            long defaultPitch = getDefaultPitchForDiameter(defaultDiameter, currentMeasure);
+            motionControl->setThreadPitch(defaultPitch);
         }
     }
 }
@@ -392,6 +421,9 @@ void OperationManager::confirmTouchOffValue() {
         resetNumpad();
         inNumpadInput = false;
         currentState = STATE_IDLE;
+        
+        // Update pitch based on touch-off diameter for intelligent defaults
+        updatePitchFromTouchOffDiameter();
         
         // Don't auto-advance - let the user press ENTER to advance
     } else if (currentState == STATE_TOUCHOFF_Z) {
@@ -1594,4 +1626,102 @@ bool OperationManager::isPitchChangeAllowed() const {
     
     // Pitch changes are allowed in all other cases
     return true;
+}
+
+long OperationManager::getDefaultPitchForDiameter(float diameter, int measure) const {
+    // Convert diameter to appropriate units for comparison
+    float diameterMm = diameter;
+    if (measure == MEASURE_INCH) {
+        diameterMm = diameter * 25.4f;  // Convert inches to mm
+    }
+    
+    if (measure == MEASURE_METRIC) {
+        // ISO Metric Thread Standards (most common pitches by diameter)
+        if (diameterMm >= 1.0f && diameterMm < 1.4f) return 250;      // M1.0 - M1.4: 0.25mm pitch
+        if (diameterMm >= 1.4f && diameterMm < 2.0f) return 300;      // M1.4 - M2.0: 0.30mm pitch
+        if (diameterMm >= 2.0f && diameterMm < 2.5f) return 400;      // M2.0 - M2.5: 0.40mm pitch
+        if (diameterMm >= 2.5f && diameterMm < 3.0f) return 450;      // M2.5 - M3.0: 0.45mm pitch
+        if (diameterMm >= 3.0f && diameterMm < 4.0f) return 500;      // M3.0 - M4.0: 0.50mm pitch
+        if (diameterMm >= 4.0f && diameterMm < 5.0f) return 700;      // M4.0 - M5.0: 0.70mm pitch
+        if (diameterMm >= 5.0f && diameterMm < 6.0f) return 800;      // M5.0 - M6.0: 0.80mm pitch
+        if (diameterMm >= 6.0f && diameterMm < 8.0f) return 1000;     // M6.0 - M8.0: 1.00mm pitch
+        if (diameterMm >= 8.0f && diameterMm < 10.0f) return 1250;    // M8.0 - M10.0: 1.25mm pitch
+        if (diameterMm >= 10.0f && diameterMm < 12.0f) return 1500;   // M10.0 - M12.0: 1.50mm pitch
+        if (diameterMm >= 12.0f && diameterMm < 16.0f) return 1750;   // M12.0 - M16.0: 1.75mm pitch
+        if (diameterMm >= 16.0f && diameterMm < 20.0f) return 2000;   // M16.0 - M20.0: 2.00mm pitch
+        if (diameterMm >= 20.0f && diameterMm < 24.0f) return 2500;   // M20.0 - M24.0: 2.50mm pitch
+        if (diameterMm >= 24.0f && diameterMm < 30.0f) return 3000;   // M24.0 - M30.0: 3.00mm pitch
+        if (diameterMm >= 30.0f && diameterMm < 36.0f) return 3500;   // M30.0 - M36.0: 3.50mm pitch
+        if (diameterMm >= 36.0f && diameterMm < 42.0f) return 4000;   // M36.0 - M42.0: 4.00mm pitch
+        if (diameterMm >= 42.0f && diameterMm < 48.0f) return 4500;   // M42.0 - M48.0: 4.50mm pitch
+        if (diameterMm >= 48.0f && diameterMm < 56.0f) return 5000;   // M48.0 - M56.0: 5.00mm pitch
+        if (diameterMm >= 56.0f && diameterMm < 64.0f) return 5500;   // M56.0 - M64.0: 5.50mm pitch
+        if (diameterMm >= 64.0f && diameterMm < 72.0f) return 6000;   // M64.0 - M72.0: 6.00mm pitch
+        if (diameterMm >= 72.0f && diameterMm < 80.0f) return 6500;   // M72.0 - M80.0: 6.50mm pitch
+        if (diameterMm >= 80.0f && diameterMm < 90.0f) return 7000;   // M80.0 - M90.0: 7.00mm pitch
+        if (diameterMm >= 90.0f && diameterMm < 100.0f) return 7500;  // M90.0 - M100.0: 7.50mm pitch
+        if (diameterMm >= 100.0f) return 8000;                       // M100.0+: 8.00mm pitch
+        
+        // Default for very small diameters
+        return 250;  // 0.25mm pitch default
+    }
+    
+    if (measure == MEASURE_INCH) {
+        // Imperial Thread Standards (most common TPI by diameter)
+        if (diameter >= 0.25f && diameter < 0.3125f) return 28;       // 1/4" - 5/16": 28 TPI
+        if (diameter >= 0.3125f && diameter < 0.375f) return 24;      // 5/16" - 3/8": 24 TPI
+        if (diameter >= 0.375f && diameter < 0.4375f) return 20;      // 3/8" - 7/16": 20 TPI
+        if (diameter >= 0.4375f && diameter < 0.5f) return 20;        // 7/16" - 1/2": 20 TPI
+        if (diameter >= 0.5f && diameter < 0.5625f) return 18;        // 1/2" - 9/16": 18 TPI
+        if (diameter >= 0.5625f && diameter < 0.625f) return 18;      // 9/16" - 5/8": 18 TPI
+        if (diameter >= 0.625f && diameter < 0.6875f) return 16;      // 5/8" - 11/16": 16 TPI
+        if (diameter >= 0.6875f && diameter < 0.75f) return 16;       // 11/16" - 3/4": 16 TPI
+        if (diameter >= 0.75f && diameter < 0.8125f) return 14;       // 3/4" - 13/16": 14 TPI
+        if (diameter >= 0.8125f && diameter < 0.875f) return 14;      // 13/16" - 7/8": 14 TPI
+        if (diameter >= 0.875f && diameter < 0.9375f) return 12;      // 7/8" - 15/16": 12 TPI
+        if (diameter >= 0.9375f && diameter < 1.0f) return 12;        // 15/16" - 1": 12 TPI
+        if (diameter >= 1.0f && diameter < 1.125f) return 12;         // 1" - 1-1/8": 12 TPI
+        if (diameter >= 1.125f && diameter < 1.25f) return 11;        // 1-1/8" - 1-1/4": 11 TPI
+        if (diameter >= 1.25f && diameter < 1.375f) return 11;        // 1-1/4" - 1-3/8": 11 TPI
+        if (diameter >= 1.375f && diameter < 1.5f) return 10;         // 1-3/8" - 1-1/2": 10 TPI
+        if (diameter >= 1.5f && diameter < 1.625f) return 10;         // 1-1/2" - 1-5/8": 10 TPI
+        if (diameter >= 1.625f && diameter < 1.75f) return 9;         // 1-5/8" - 1-3/4": 9 TPI
+        if (diameter >= 1.75f && diameter < 1.875f) return 9;         // 1-3/4" - 1-7/8": 9 TPI
+        if (diameter >= 1.875f && diameter < 2.0f) return 8;          // 1-7/8" - 2": 8 TPI
+        if (diameter >= 2.0f && diameter < 2.25f) return 8;           // 2" - 2-1/4": 8 TPI
+        if (diameter >= 2.25f && diameter < 2.5f) return 7;           // 2-1/4" - 2-1/2": 7 TPI
+        if (diameter >= 2.5f && diameter < 2.75f) return 7;           // 2-1/2" - 2-3/4": 7 TPI
+        if (diameter >= 2.75f && diameter < 3.0f) return 6;           // 2-3/4" - 3": 6 TPI
+        if (diameter >= 3.0f && diameter < 3.5f) return 6;            // 3" - 3-1/2": 6 TPI
+        if (diameter >= 3.5f && diameter < 4.0f) return 5;            // 3-1/2" - 4": 5 TPI
+        if (diameter >= 4.0f && diameter < 4.5f) return 5;            // 4" - 4-1/2": 5 TPI
+        if (diameter >= 4.5f && diameter < 5.0f) return 4;            // 4-1/2" - 5": 4 TPI
+        if (diameter >= 5.0f) return 4;                               // 5"+: 4 TPI
+        
+        // Default for very small imperial diameters
+        return 28;  // 28 TPI default
+    }
+    
+    if (measure == MEASURE_TPI) {
+        // TPI mode - same as imperial but with TPI values
+        return getDefaultPitchForDiameter(diameter, MEASURE_INCH);
+    }
+    
+    // Default fallback
+    return 1000;  // 1.0mm pitch default
+}
+
+void OperationManager::updatePitchFromTouchOffDiameter() {
+    // Only update pitch if we have a valid touch-off diameter and we're in threading mode
+    if (currentMode == MODE_THREAD && touchOffXValid && motionControl) {
+        float diameter = touchOffXCoord;  // Touch-off X coordinate is the diameter
+        
+        // Get intelligent default pitch for this diameter
+        long defaultPitch = getDefaultPitchForDiameter(diameter, currentMeasure);
+        
+        // Only update if pitch is not locked (not during active threading)
+        if (isPitchChangeAllowed()) {
+            motionControl->setThreadPitch(defaultPitch);
+        }
+    }
 }

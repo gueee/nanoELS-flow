@@ -187,6 +187,11 @@ void NextionDisplay::showMotionStatus() {
     pitchLine += " LOCKED";
   }
   
+  // Add auto-pitch indicator for threading mode
+  if (operationManager.getMode() == MODE_THREAD && !motionControl.isThreadingActive()) {
+    pitchLine += " AUTO";
+  }
+  
   setPitchLine(pitchLine);
   
   // Position line: Axis positions (matching original format "Z:xxx.xx X:xxx.xx")

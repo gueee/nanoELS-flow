@@ -289,6 +289,10 @@ public:
     // Safety checks
     bool isPitchChangeAllowed() const;  // Check if pitch changes are allowed (not during threading)
     
+    // Intelligent pitch defaults
+    long getDefaultPitchForDiameter(float diameter, int measure) const;  // Get default pitch based on diameter and unit
+    void updatePitchFromTouchOffDiameter();  // Update pitch based on touch-off diameter
+    
     // Operation parameter getters
     float getCutLengthMm() const { return stepsToMm(cutLength, 1); }  // Z axis
     float getCutDepthMm() const { return stepsToMm(cutDepth, 0); }    // X axis
