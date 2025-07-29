@@ -2,6 +2,8 @@
 #define OPERATION_MANAGER_H
 
 #include <Arduino.h>
+#include "MinimalMotionControl.h"
+#include "CuttingParameters.h"
 
 // h5.ino-compatible measurement units
 #define MEASURE_METRIC 0
@@ -30,7 +32,8 @@ enum OperationMode {
     MODE_CUT = 5,       // Cut-off operation
     MODE_ASYNC = 6,     // Asynchronous mode
     MODE_ELLIPSE = 7,   // Elliptical cutting mode
-    MODE_GCODE = 8      // G-code execution mode
+    MODE_GCODE = 8,     // G-code execution mode
+    MODE_CUTTING_PARAMS = 9  // Cutting parameters calculator mode
 };
 
 // Arrow key mode control for safety
@@ -54,7 +57,13 @@ enum OperationState {
     STATE_READY,            // Ready to start operation
     STATE_RUNNING,          // Operation in progress
     STATE_PARKING,          // Moving to parking position
-    STATE_NEXT_PASS         // Preparing next pass
+    STATE_NEXT_PASS,        // Preparing next pass
+    // Cutting parameters states
+    STATE_CUTTING_PARAMS_MATERIAL,  // Selecting material type
+    STATE_CUTTING_PARAMS_TOOL,      // Selecting tool type
+    STATE_CUTTING_PARAMS_OPERATION, // Selecting operation type
+    STATE_CUTTING_PARAMS_DIAMETER,  // Entering workpiece diameter
+    STATE_CUTTING_PARAMS_RESULT     // Showing calculated RPM result
 };
 
 // Pass sub-states for multi-pass operations
@@ -292,6 +301,26 @@ public:
     // Intelligent pitch defaults
     long getDefaultPitchForDiameter(float diameter, int measure) const;  // Get default pitch based on diameter and unit
     void updatePitchFromTouchOffDiameter();  // Update pitch based on touch-off diameter
+    
+    // Cutting parameters member variables
+    MaterialCategory cuttingParamsMaterial;
+    ToolType cuttingParamsTool;
+    OperationType cuttingParamsOperation;
+    float cuttingParamsDiameter;
+    int cuttingParamsStep;
+    RPMResult cuttingParamsResult;
+    
+    // Cutting parameters system
+    void startCuttingParamsEntry();           // Start cutting parameters mode
+    void setCuttingParamsMaterial(MaterialCategory material);  // Set material for cutting parameters
+    void setCuttingParamsTool(ToolType tool); // Set tool type for cutting parameters
+    void setCuttingParamsOperation(OperationType operation); // Set operation type for cutting parameters
+    void setCuttingParamsDiameter(float diameter); // Set diameter for cutting parameters
+    RPMResult getCuttingParamsResult() const; // Get calculated RPM result
+    void nextCuttingParamsStep();             // Advance to next cutting parameters step
+    void previousCuttingParamsStep();         // Go back in cutting parameters steps
+    int getCuttingParamsStep() const;         // Get current cutting parameters step
+    String getCuttingParamsPrompt() const;    // Get current cutting parameters prompt
     
     // Operation parameter getters
     float getCutLengthMm() const { return stepsToMm(cutLength, 1); }  // Z axis

@@ -32,7 +32,7 @@ OperationManager::OperationManager()
     , targetZLength(0)
     , cutLength(0)
     , cutDepth(0)
-    , numPasses(1)
+    , numPasses(3)
     , coneRatio(0.0f)
     , currentPass(0)
     , passDepth(0)
@@ -40,11 +40,22 @@ OperationManager::OperationManager()
     , opDupr(0)
     , spindleSyncPos(0)
     , startOffset(0)
+    , cuttingParamsMaterial(MATERIAL_MILD_STEEL)
+    , cuttingParamsTool(TOOL_CARBIDE_COATED)
+    , cuttingParamsOperation(OP_ROUGH_TURNING)
+    , cuttingParamsDiameter(25.0f)
+    , cuttingParamsStep(0)
 {
     // Initialize numpad digits array
     for (int i = 0; i < 20; i++) {
         numpadDigits[i] = 0;
     }
+    
+    // Initialize cutting parameters result
+    cuttingParamsResult.isValid = false;
+    cuttingParamsResult.rpm = 0;
+    cuttingParamsResult.cuttingSpeed = 0.0f;
+    cuttingParamsResult.recommendation = "";
 }
 
 void OperationManager::init(MinimalMotionControl* mc) {
@@ -338,6 +349,19 @@ void OperationManager::setMode(OperationMode mode) {
             long defaultPitch = getDefaultPitchForDiameter(defaultDiameter, currentMeasure);
             motionControl->setThreadPitch(defaultPitch);
         }
+    }
+    
+    // Initialize cutting parameters mode
+    if (mode == MODE_CUTTING_PARAMS) {
+        // Reset to initial cutting parameters state
+        currentState = STATE_CUTTING_PARAMS_MATERIAL;
+        cuttingParamsStep = 0;
+        cuttingParamsMaterial = MATERIAL_MILD_STEEL;  // Default material
+        cuttingParamsTool = TOOL_CARBIDE_COATED;      // Default tool
+        cuttingParamsOperation = OP_ROUGH_TURNING;    // Default operation
+        cuttingParamsDiameter = 25.0f;               // Default diameter
+        resetNumpad();
+        inNumpadInput = false;
     }
 }
 
@@ -1267,36 +1291,62 @@ String OperationManager::getPromptText() {
     
     // Handle other modes
     if (isPassMode()) {
-        // Other pass modes can use similar structure
-        return "Pass mode setup";
-    } else if (currentMode == MODE_CONE) {
-        if (inNumpadInput && numpadIndex > 0 && setupIndex == 1) {
-            float ratio = getNumpadResult() / 100000.0f;
-            return "Use ratio " + String(ratio, 5) + "?";
-        } else if (setupIndex == 1) {
-            return "Use ratio " + String(coneRatio, 5) + "?";
-        } else if (setupIndex == 2) {
-            return isInternalOperation ? "Internal?" : "External?";
-        } else if (setupIndex >= getLastSetupIndex()) {
-            return "Go?";
+        switch (setupIndex) {
+            case 0:  // Step 1: Pass count
+                if (inNumpadInput && numpadIndex > 0) {
+                    long passes = getNumpadResult();
+                    return String(passes) + " passes";
+                }
+                return String(numPasses) + " passes";
+            case 1:  // Step 2: Direction selection
+                {
+                    String direction = isLeftToRight ? "L→R" : "R→L";
+                    String type = isInternalOperation ? "INT" : "EXT";
+                    return direction + " " + type + " ←→↑↓";
+                }
+            case 2:  // Step 3: Touch-off both axes (any order)
+                if (currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
+                    return getTouchOffDisplayText();
+                }
+                if (touchOffXValid && touchOffZValid) {
+                    // Both values confirmed, show them and prompt to continue
+                    return "X" + formatDeciMicrons(touchOffXCoord * 10000, 1) + " Z" + formatDeciMicrons(touchOffZCoord * 10000, 1);
+                }
+                return "Touch off";
+            case 3:  // Step 4: Move to parking position
+                return "Move to parking pos";
+            case 4:  // Step 5: Set target diameter and length
+                if (currentState == STATE_TARGET_DIAMETER) {
+                    if (inNumpadInput && numpadIndex > 0) {
+                        return "X:" + getNumpadDisplayText();
+                    }
+                    return "Target X (final)";
+                } else if (currentState == STATE_TARGET_LENGTH) {
+                    if (inNumpadInput && numpadIndex > 0) {
+                        return "L:" + getNumpadDisplayText();
+                    }
+                    return "Cut length";
+                } else {
+                    // Show current values if set
+                    if (targetDiameter > 0 && targetZLength > 0) {
+                        return "X" + formatDeciMicrons(targetDiameter, 1) + " L" + formatDeciMicrons(targetZLength, 1);
+                    } else if (targetDiameter > 0) {
+                        return "X" + formatDeciMicrons(targetDiameter, 1) + " →L?";
+                    } else {
+                        return "Set target X & L";
+                    }
+                }
+            default:
+                return "Ready";
         }
     }
     
-    // Handle numpad input for parameter setup
-    if (inNumpadInput && numpadIndex > 0) {
-        long deciMicrons = numpadToDeciMicrons();
-        return "Use " + formatDeciMicrons(deciMicrons, 5) + "?";
+    // Handle cutting parameters mode
+    if (currentMode == MODE_CUTTING_PARAMS) {
+        return getCuttingParamsPrompt();
     }
     
-    // Fallback to state-based prompts for touch-off and special states
-    if (currentState == STATE_TOUCHOFF_X || currentState == STATE_TOUCHOFF_Z) {
-        return getTouchOffDisplayText();
-    } else if (currentState == STATE_PARKING_SETUP) {
-        return getParkingDisplayText();
-    } else if (currentState == STATE_TARGET_DIAMETER || currentState == STATE_TARGET_LENGTH) {
-        return getTargetDisplayText();
-    }
-    
+    // Default for other modes
     return "Ready";
 }
 
@@ -1723,5 +1773,125 @@ void OperationManager::updatePitchFromTouchOffDiameter() {
         if (isPitchChangeAllowed()) {
             motionControl->setThreadPitch(defaultPitch);
         }
+    }
+}
+
+// Cutting parameters system implementation
+void OperationManager::startCuttingParamsEntry() {
+    currentState = STATE_CUTTING_PARAMS_MATERIAL;
+    cuttingParamsStep = 0;
+    resetNumpad();
+    inNumpadInput = false;
+}
+
+void OperationManager::setCuttingParamsMaterial(MaterialCategory material) {
+    cuttingParamsMaterial = material;
+}
+
+void OperationManager::setCuttingParamsTool(ToolType tool) {
+    cuttingParamsTool = tool;
+}
+
+void OperationManager::setCuttingParamsOperation(OperationType operation) {
+    cuttingParamsOperation = operation;
+}
+
+void OperationManager::setCuttingParamsDiameter(float diameter) {
+    cuttingParamsDiameter = diameter;
+}
+
+RPMResult OperationManager::getCuttingParamsResult() const {
+    return cuttingParamsResult;
+}
+
+void OperationManager::nextCuttingParamsStep() {
+    switch (currentState) {
+        case STATE_CUTTING_PARAMS_MATERIAL:
+            currentState = STATE_CUTTING_PARAMS_TOOL;
+            break;
+        case STATE_CUTTING_PARAMS_TOOL:
+            currentState = STATE_CUTTING_PARAMS_OPERATION;
+            break;
+        case STATE_CUTTING_PARAMS_OPERATION:
+            currentState = STATE_CUTTING_PARAMS_DIAMETER;
+            resetNumpad();
+            inNumpadInput = true;
+            break;
+        case STATE_CUTTING_PARAMS_DIAMETER:
+            if (inNumpadInput && numpadIndex > 0) {
+                // Convert numpad result to diameter
+                float diameter = getNumpadResult() / 1000.0f; // Convert from deci-microns to mm
+                if (currentMeasure == MEASURE_INCH || currentMeasure == MEASURE_TPI) {
+                    diameter = diameter / 25.4f; // Convert mm to inches
+                }
+                setCuttingParamsDiameter(diameter);
+                resetNumpad();
+                inNumpadInput = false;
+            }
+            currentState = STATE_CUTTING_PARAMS_RESULT;
+            // Calculate result
+            cuttingParamsResult = cuttingParams.calculateRPM(
+                cuttingParamsMaterial, 
+                cuttingParamsTool, 
+                cuttingParamsOperation, 
+                cuttingParamsDiameter, 
+                currentMeasure == MEASURE_METRIC
+            );
+            break;
+        case STATE_CUTTING_PARAMS_RESULT:
+            // Return to material selection for new calculation
+            currentState = STATE_CUTTING_PARAMS_MATERIAL;
+            break;
+    }
+}
+
+void OperationManager::previousCuttingParamsStep() {
+    switch (currentState) {
+        case STATE_CUTTING_PARAMS_TOOL:
+            currentState = STATE_CUTTING_PARAMS_MATERIAL;
+            break;
+        case STATE_CUTTING_PARAMS_OPERATION:
+            currentState = STATE_CUTTING_PARAMS_TOOL;
+            break;
+        case STATE_CUTTING_PARAMS_DIAMETER:
+            currentState = STATE_CUTTING_PARAMS_OPERATION;
+            resetNumpad();
+            inNumpadInput = false;
+            break;
+        case STATE_CUTTING_PARAMS_RESULT:
+            currentState = STATE_CUTTING_PARAMS_DIAMETER;
+            resetNumpad();
+            inNumpadInput = true;
+            break;
+        case STATE_CUTTING_PARAMS_MATERIAL:
+            // Stay at material selection
+            break;
+    }
+}
+
+int OperationManager::getCuttingParamsStep() const {
+    return cuttingParamsStep;
+}
+
+String OperationManager::getCuttingParamsPrompt() const {
+    switch (currentState) {
+        case STATE_CUTTING_PARAMS_MATERIAL:
+            return "Select Material";
+        case STATE_CUTTING_PARAMS_TOOL:
+            return "Select Tool";
+        case STATE_CUTTING_PARAMS_OPERATION:
+            return "Select Operation";
+        case STATE_CUTTING_PARAMS_DIAMETER:
+            if (inNumpadInput && numpadIndex > 0) {
+                return "D:" + getNumpadDisplayText();
+            }
+            return "Enter Diameter";
+        case STATE_CUTTING_PARAMS_RESULT:
+            if (cuttingParamsResult.isValid) {
+                return cuttingParamsResult.recommendation;
+            }
+            return "Invalid Parameters";
+        default:
+            return "Cutting Parameters";
     }
 }
