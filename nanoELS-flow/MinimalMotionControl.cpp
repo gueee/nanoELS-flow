@@ -152,8 +152,9 @@ int32_t MinimalMotionControl::positionFromSpindle(int axis, int32_t spindlePos) 
     MinimalAxis& a = axes[axis];
     
     // Exact h5.ino formula adapted for our 600 PPR encoder
-    int32_t newPos = spindlePos * a.motorSteps / a.screwPitch / ENCODER_STEPS_FLOAT 
-                     * spindle.threadPitch * spindle.threadStarts;
+    // Formula: (spindlePos * motorSteps * threadPitch * threadStarts) / (screwPitch * encoderSteps)
+    int32_t newPos = spindlePos * a.motorSteps * spindle.threadPitch * spindle.threadStarts 
+                     / (a.screwPitch * (int32_t)ENCODER_STEPS_FLOAT);
     
     // Respect software limits (h5.ino style)
     if (newPos < a.rightStop) newPos = a.rightStop;
@@ -167,7 +168,9 @@ int32_t MinimalMotionControl::spindleFromPosition(int axis, int32_t axisPos) {
     MinimalAxis& a = axes[axis];
     
     // h5.ino inverse formula
-    return axisPos * a.screwPitch * ENCODER_STEPS_FLOAT / a.motorSteps / (spindle.threadPitch * spindle.threadStarts);
+    // Formula: (axisPos * screwPitch * encoderSteps) / (motorSteps * threadPitch * threadStarts)
+    return axisPos * a.screwPitch * (int32_t)ENCODER_STEPS_FLOAT 
+           / (a.motorSteps * spindle.threadPitch * spindle.threadStarts);
 }
 
 // Core h5.ino algorithm: Spindle tracking with backlash compensation
