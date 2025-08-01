@@ -883,16 +883,9 @@ bool OperationManager::performCuttingPass() {
                 targetX = touchOffX + mmToSteps((targetDiameter - touchOffXCoord) / 2.0f, AXIS_X);
                 motionControl->setTargetPosition(AXIS_X, targetX);
                 
-                // h5.ino style: Set Z target based on spindle movement from sync position
-                long spindlePos = motionControl->getSpindlePosition();
-                long spindleDelta = spindlePos - spindleSyncPos;  // Movement since sync
-                long targetZFromSpindle = motionControl->positionFromSpindle(AXIS_Z, spindleDelta);
-                long targetZ = touchOffZ + targetZFromSpindle;  // Add to start position
-                
-                motionControl->setTargetPosition(AXIS_Z, targetZ);
-                
-                // Track movement for completion checking
-                long deltaZ = targetZFromSpindle;
+                // h5.ino style: Let the main loop handle Z positioning via spindle sync
+                // DON'T constantly set new targets - this interrupts smooth motion!
+                // The main loop's spindle sync will handle continuous Z movement
                 
                 // Check if we've reached the cut length
                 // For turning operations, check actual Z position vs target

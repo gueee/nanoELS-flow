@@ -257,12 +257,11 @@ void loop() {
         // Process MPG movement (takes priority over threading)
         motionControl.processMPGMovement(axis);
         
-        // Set spindle-sync target positions ONLY for gearbox mode (MODE_NORMAL)
-        // For cutting operations, the OperationManager handles target setting
+        // Set spindle-sync target positions for all threading operations
+        // This provides the continuous stream of targets needed for smooth motion
         if (motionControl.isThreadingActive() && 
             motionControl.getDupr() != 0 && 
-            !motionControl.isMPGEnabled(axis) &&
-            operationManager.getMode() == MODE_NORMAL) {
+            !motionControl.isMPGEnabled(axis)) {
           int32_t newTarget = motionControl.positionFromSpindle(axis, motionControl.getSpindlePositionAvg());
           motionControl.setTargetPosition(axis, newTarget);
         }
