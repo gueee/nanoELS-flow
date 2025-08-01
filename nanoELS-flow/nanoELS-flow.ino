@@ -777,12 +777,12 @@ void processKeypadEvent() {
           break;
         }
         
-        // Increment pitch by small amount (like h5.ino)
-        long currentDupr = motionControl.getDupr();  // Get current pitch
+        // Increment pitch by small amount (always positive)
+        long currentDupr = abs(motionControl.getDupr());  // Get absolute pitch
         long delta = (operationManager.getCurrentMeasure() == MEASURE_METRIC) ? 100 : 254; // 0.01mm or 0.001"
         long newDupr = currentDupr + delta;
         if (newDupr <= DUPR_MAX) {
-          motionControl.setThreadPitch(newDupr);
+          motionControl.setThreadPitch(newDupr);  // Always store as positive
           nextionDisplay.showMessage("Pitch: " + operationManager.formatDupr(newDupr));
         }
       } else if (operationManager.isInNumpadInput()) {
@@ -823,12 +823,12 @@ void processKeypadEvent() {
           break;
         }
         
-        // Decrement pitch by small amount (like h5.ino)
-        long currentDupr = motionControl.getDupr();  // Get current pitch
+        // Decrement pitch by small amount (always positive)
+        long currentDupr = abs(motionControl.getDupr());  // Get absolute pitch
         long delta = (operationManager.getCurrentMeasure() == MEASURE_METRIC) ? 100 : 254; // 0.01mm or 0.001"
         long newDupr = currentDupr - delta;
-        if (newDupr >= -DUPR_MAX) {
-          motionControl.setThreadPitch(newDupr);
+        if (newDupr > 0) {  // Keep pitch positive
+          motionControl.setThreadPitch(newDupr);  // Always store as positive
           nextionDisplay.showMessage("Pitch: " + operationManager.formatDupr(newDupr));
         }
       } else if (operationManager.isInNumpadInput()) {

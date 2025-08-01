@@ -320,10 +320,10 @@ void OperationManager::setMode(OperationMode mode) {
         isInternalOperation = false;  // Default to external
         isLeftToRight = false;        // Default to R→L
         
-        // Set default feed rate for turning (0.1mm or 0.004" per rev)
+        // Set default feed rate for turning (0.1mm or 0.004" per rev) - always positive
         if (motionControl) {
             long defaultFeedRate = (currentMeasure == MEASURE_METRIC) ? 1000 : 1016; // 0.1mm or 0.004"
-            motionControl->setThreadPitch(defaultFeedRate);
+            motionControl->setThreadPitch(defaultFeedRate);  // Always positive, direction from isLeftToRight
         }
     }
     
@@ -339,10 +339,10 @@ void OperationManager::setMode(OperationMode mode) {
         isInternalOperation = false;
         isLeftToRight = false;
         
-        // Set default feed rate for facing (0.1mm or 0.004" per rev)
+        // Set default feed rate for facing (0.1mm or 0.004" per rev) - always positive
         if (motionControl) {
             long defaultFeedRate = (currentMeasure == MEASURE_METRIC) ? 1000 : 1016; // 0.1mm or 0.004"
-            motionControl->setThreadPitch(defaultFeedRate);
+            motionControl->setThreadPitch(defaultFeedRate);  // Always positive, direction from isLeftToRight
         }
     }
     
@@ -727,17 +727,31 @@ bool OperationManager::startOperation() {
     passSubState = SUBSTATE_MOVE_TO_START;
     currentPass = 0;
     
+    // Get the absolute pitch value
+    long absPitch = abs(motionControl->getDupr());
+    
+    // Determine direction based on operation settings
+    if (currentMode == MODE_TURN || currentMode == MODE_FACE || currentMode == MODE_CUT) {
+        // For turning/facing/cutoff: direction from operation settings
+        opDuprSign = isLeftToRight ? 1 : -1;
+        // Set the pitch with the correct sign for motion control
+        motionControl->setThreadPitch(absPitch * opDuprSign);
+    } else if (currentMode == MODE_THREAD) {
+        // For threading: keep the sign from the pitch (for left/right hand threads)
+        opDuprSign = (motionControl->getDupr() >= 0) ? 1 : -1;
+    } else {
+        opDuprSign = 1; // Default
+    }
+    
     // Enable spindle sync for all cutting operations
-    // (h5.ino uses the same logic for turning and threading)
     if (currentMode == MODE_TURN || currentMode == MODE_FACE || 
         currentMode == MODE_THREAD || currentMode == MODE_CUT || 
         currentMode == MODE_CONE) {
         motionControl->startThreading(); // Enable spindle sync
     }
     
-    // Save current pitch for consistency
-    opDupr = motionControl->getDupr();
-    opDuprSign = (opDupr >= 0) ? 1 : -1;
+    // Save the absolute pitch for display
+    opDupr = absPitch;
     
     // Calculate start offset for multi-start threads
     int starts = motionControl->getStarts();
