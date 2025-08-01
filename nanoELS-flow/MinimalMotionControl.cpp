@@ -17,6 +17,7 @@ MinimalMotionControl::MinimalMotionControl() {
     spindle.threadPitch = 0;
     spindle.threadStarts = 1;
     spindle.threadingActive = false;
+    spindle.spindlePosSync = 0;  // Initialize synchronization offset
     
     // Initialize MPG trackers (h5.ino style)
     for (int i = 0; i < 2; i++) {
@@ -60,6 +61,12 @@ MinimalMotionControl::MinimalMotionControl() {
         // Safety (start with no limits)
         axis.leftStop = LONG_MAX;
         axis.rightStop = LONG_MIN;
+        
+        // Deferred stop system (h5.ino style)
+        axis.nextLeftStop = LONG_MAX;
+        axis.nextRightStop = LONG_MIN;
+        axis.nextLeftStopFlag = false;
+        axis.nextRightStopFlag = false;
         
         // Status
         axis.enabled = false;
@@ -195,7 +202,83 @@ void MinimalMotionControl::updateSpindleTracking() {
     }
     // Else: within deadband, maintain current positionAvg
     
+    // Synchronization recovery (h5.ino logic)
+    if (spindle.spindlePosSync != 0) {
+        spindle.spindlePosSync += delta;
+        if (spindle.spindlePosSync % ENCODER_STEPS_INT == 0) {
+            spindle.spindlePosSync = 0;
+            int axis = getPitchAxis();  // Get primary axis
+            spindle.positionAvg = spindle.position = spindleFromPosition(axis, axes[axis].position);
+        }
+    }
+    
     spindle.lastUpdateTime = micros();
+}
+
+// Utility function for spindle position modulo (h5.ino spindleModulo)
+int32_t MinimalMotionControl::spindleModulo(int32_t value) {
+    value = value % ENCODER_STEPS_INT;
+    if (value < 0) {
+        value += ENCODER_STEPS_INT;
+    }
+    return value;
+}
+
+// Handle full spindle turns when axis is stopped (h5.ino discountFullSpindleTurns)
+void MinimalMotionControl::discountFullSpindleTurns() {
+    // When standing at the stop, ignore full spindle turns.
+    // This allows to avoid waiting when spindle direction reverses
+    // and reduces the chance of the skipped stepper steps since
+    // after a reverse the spindle starts slow.
+    if (spindle.threadPitch != 0 && !isMoving(AXIS_Z)) {
+        int32_t spindlePosDiff = 0;
+        if (axes[AXIS_Z].position == axes[AXIS_Z].rightStop) {
+            int32_t stopSpindlePos = spindleFromPosition(AXIS_Z, axes[AXIS_Z].rightStop);
+            if (spindle.threadPitch > 0) {
+                if (spindle.position < stopSpindlePos - ENCODER_STEPS_INT) {
+                    spindlePosDiff = ENCODER_STEPS_INT;
+                }
+            } else {
+                if (spindle.position > stopSpindlePos + ENCODER_STEPS_INT) {
+                    spindlePosDiff = -ENCODER_STEPS_INT;
+                }
+            }
+        } else if (axes[AXIS_Z].position == axes[AXIS_Z].leftStop) {
+            int32_t stopSpindlePos = spindleFromPosition(AXIS_Z, axes[AXIS_Z].leftStop);
+            if (spindle.threadPitch > 0) {
+                if (spindle.position > stopSpindlePos + ENCODER_STEPS_INT) {
+                    spindlePosDiff = -ENCODER_STEPS_INT;
+                }
+            } else {
+                if (spindle.position < stopSpindlePos - ENCODER_STEPS_INT) {
+                    spindlePosDiff = ENCODER_STEPS_INT;
+                }
+            }
+        }
+        
+        if (spindlePosDiff != 0) {
+            spindle.position += spindlePosDiff;
+            spindle.positionAvg += spindlePosDiff;
+        }
+    }
+}
+
+// Handle synchronization loss when leaving stops (h5.ino leaveStop)
+void MinimalMotionControl::leaveStop(int axis, int32_t oldStop) {
+    // This function is called when a stop limit is changed while the axis is at that stop
+    // The spindle is most likely out of sync with the stepper because
+    // it was spinning while the lead screw was on the stop.
+    if (axis == getPitchAxis() && axes[axis].position == oldStop) {
+        // Calculate the synchronization offset
+        spindle.spindlePosSync = spindleModulo(spindle.position - spindleFromPosition(axis, axes[axis].position));
+    }
+}
+
+// Get the primary axis for threading (h5.ino getPitchAxis)
+int MinimalMotionControl::getPitchAxis() {
+    // For most modes, Z is the primary axis for threading
+    // This could be extended to handle different modes like FACE mode where X is primary
+    return AXIS_Z;
 }
 
 // Core update loop (call from main loop at ~5kHz)
@@ -206,6 +289,9 @@ void MinimalMotionControl::update() {
     
     // Update spindle tracking with backlash compensation
     updateSpindleTracking();
+    
+    // Handle full spindle turns when stopped (h5.ino logic)
+    discountFullSpindleTurns();
     
     // Update MPG tracking (h5.ino style continuous monitoring)
     updateMPGTracking();
@@ -392,8 +478,30 @@ void MinimalMotionControl::setEmergencyStop(bool stop) {
 
 void MinimalMotionControl::setSoftLimits(int axis, int32_t leftLimit, int32_t rightLimit) {
     if (axis >= 0 && axis < 2) {
-        axes[axis].leftStop = leftLimit;
-        axes[axis].rightStop = rightLimit;
+        // Defer the stop changes (h5.ino style for thread safety)
+        // This prevents race conditions with motion control
+        axes[axis].nextLeftStop = leftLimit;
+        axes[axis].nextRightStop = rightLimit;
+        axes[axis].nextLeftStopFlag = true;
+        axes[axis].nextRightStopFlag = true;
+    }
+}
+
+void MinimalMotionControl::applyPendingStops() {
+    // Apply pending stops safely in main loop (h5.ino style)
+    for (int axis = 0; axis < 2; axis++) {
+        if (axes[axis].nextLeftStopFlag) {
+            int32_t oldStop = axes[axis].leftStop;
+            axes[axis].leftStop = axes[axis].nextLeftStop;
+            leaveStop(axis, oldStop);
+            axes[axis].nextLeftStopFlag = false;
+        }
+        if (axes[axis].nextRightStopFlag) {
+            int32_t oldStop = axes[axis].rightStop;
+            axes[axis].rightStop = axes[axis].nextRightStop;
+            leaveStop(axis, oldStop);
+            axes[axis].nextRightStopFlag = false;
+        }
     }
 }
 
@@ -409,6 +517,7 @@ void MinimalMotionControl::resetSpindlePosition() {
     spindle.position = 0;
     spindle.positionAvg = 0;
     spindle.lastCount = 0;
+    spindle.spindlePosSync = 0;  // Reset synchronization offset
     pcnt_counter_clear(PCNT_UNIT_0);
 }
 

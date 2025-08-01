@@ -69,6 +69,12 @@ struct MinimalAxis {
     int32_t leftStop;                   // Left software limit
     int32_t rightStop;                  // Right software limit
     
+    // Deferred stop system (h5.ino style for thread safety)
+    int32_t nextLeftStop;               // Pending left stop value
+    int32_t nextRightStop;              // Pending right stop value
+    bool nextLeftStopFlag;              // Apply left stop flag
+    bool nextRightStopFlag;             // Apply right stop flag
+    
     // Status
     bool enabled;                       // Axis enabled state
 };
@@ -84,6 +90,9 @@ struct SpindleTracker {
     int32_t threadPitch;                // dupr (deci-microns per revolution)
     int32_t threadStarts;               // Multi-start thread count
     bool threadingActive;               // Threading mode active
+    
+    // Synchronization management (h5.ino style)
+    int32_t spindlePosSync;             // Synchronization offset when out of sync
 };
 
 // MPG tracking (h5.ino exact approach)
@@ -107,18 +116,28 @@ private:
     static MinimalMotionControl* instance;
     
     // Core motion functions (h5.ino algorithms)
-    int32_t positionFromSpindle(int axis, int32_t spindlePos);
-    int32_t spindleFromPosition(int axis, int32_t axisPos);
-    void updateSpindleTracking();
-    void updateAxisMotion(int axis);
-    void updateAxisMotionSpindleSync(int axis);
     void generateStepPulse(int axis);
     void updateSpeed(int axis);
+    
+    // Synchronization management (h5.ino style)
+    int32_t spindleModulo(int32_t value);
+    void discountFullSpindleTurns();
+    void leaveStop(int axis, int32_t oldStop);
+    int getPitchAxis();  // Returns primary axis for threading (Z for most modes)
     
     // MPG functions (h5.ino exact approach)
     void updateMPGTracking();
     int32_t getMPGDelta(int axis);
+    
+    // Real-time motion functions (for main loop)
+    int32_t positionFromSpindle(int axis, int32_t spindlePos);
+    int32_t spindleFromPosition(int axis, int32_t axisPos);
+    void updateSpindleTracking();
+    void updateAxisMotion(int axis);
     void processMPGMovement(int axis);
+    
+    // Safe stop application (h5.ino style)
+    void applyPendingStops();
     
     // Hardware initialization
     void initializeEncoders();

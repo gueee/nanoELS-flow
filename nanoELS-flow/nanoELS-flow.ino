@@ -214,7 +214,7 @@ void setup() {
   // Add tasks in priority order
   scheduler.addTask("EmergencyCheck", taskEmergencyCheck, PRIORITY_CRITICAL, 0);  // Every loop
   scheduler.addTask("KeyboardScan", taskKeyboardScan, PRIORITY_CRITICAL, 0);      // Every loop
-  scheduler.addTask("MotionUpdate", taskMotionUpdate, PRIORITY_CRITICAL, 0);      // Every loop (~100kHz)
+  // MotionUpdate removed - now handled in main loop for real-time spindle sync
   scheduler.addTask("OperationUpdate", taskOperationUpdate, PRIORITY_CRITICAL, 0); // Every loop for operations
   scheduler.addTask("DisplayUpdate", taskDisplayUpdate, PRIORITY_NORMAL, 50);     // 20Hz
   scheduler.addTask("WebUpdate", taskWebUpdate, PRIORITY_NORMAL, 20);             // 50Hz
@@ -242,11 +242,35 @@ void loop() {
   // Non-blocking state machine implementation
   // No delays - runs at maximum speed (~100kHz)
   
-  // Option 1: Use time-sliced scheduler (recommended)
-  scheduler.update();
+  // CRITICAL: Real-time motion control (every loop iteration)
+  // This must be in main loop for proper spindle synchronization
+  if (!motionControl.getEmergencyStop()) {
+    // Real-time spindle tracking (every loop iteration)
+    motionControl.updateSpindleTracking();
+    
+    // Real-time axis motion (every loop iteration)
+    for (int axis = 0; axis < 2; axis++) {
+      if (motionControl.isAxisEnabled(axis)) {
+        // Process MPG movement (takes priority over threading)
+        motionControl.processMPGMovement(axis);
+        
+        // Calculate target position from spindle (if threading and MPG not active)
+        if (motionControl.isThreadingActive() && motionControl.getDupr() != 0 && !motionControl.isMPGEnabled(axis)) {
+          int32_t newTarget = motionControl.positionFromSpindle(axis, motionControl.getSpindlePositionAvg());
+          motionControl.setTargetPosition(axis, newTarget);
+        }
+        
+        // Update axis motion
+        motionControl.updateAxisMotion(axis);
+      }
+    }
+    
+    // Apply pending stops safely (h5.ino style)
+    motionControl.applyPendingStops();
+  }
   
-  // Option 2: Use state machine (alternative)
-  // stateMachine.update();
+  // Non-critical tasks can use scheduler
+  scheduler.update();
   
   // No delay() - emergency stop checked every loop iteration!
 }
