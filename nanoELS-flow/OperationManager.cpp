@@ -319,6 +319,31 @@ void OperationManager::setMode(OperationMode mode) {
         numPasses = 3;
         isInternalOperation = false;  // Default to external
         isLeftToRight = false;        // Default to R→L
+        
+        // Set default feed rate for turning (0.1mm or 0.004" per rev)
+        if (motionControl) {
+            long defaultFeedRate = (currentMeasure == MEASURE_METRIC) ? 1000 : 1016; // 0.1mm or 0.004"
+            motionControl->setThreadPitch(defaultFeedRate);
+        }
+    }
+    
+    // Reset workflow-specific values for facing mode
+    if (mode == MODE_FACE) {
+        // Clear previous values (same as turning)
+        clearTouchOff();
+        clearTargets();
+        clearParkingPosition();
+        resetNumpad();
+        // Default values
+        numPasses = 3;
+        isInternalOperation = false;
+        isLeftToRight = false;
+        
+        // Set default feed rate for facing (0.1mm or 0.004" per rev)
+        if (motionControl) {
+            long defaultFeedRate = (currentMeasure == MEASURE_METRIC) ? 1000 : 1016; // 0.1mm or 0.004"
+            motionControl->setThreadPitch(defaultFeedRate);
+        }
     }
     
     // Reset workflow-specific values for threading mode
@@ -702,18 +727,11 @@ bool OperationManager::startOperation() {
     passSubState = SUBSTATE_MOVE_TO_START;
     currentPass = 0;
     
-    // For turning operations, set appropriate feed rate
-    if (currentMode == MODE_TURN || currentMode == MODE_FACE) {
-        // Use a reasonable feed rate for turning (0.1mm per revolution)
-        // Negative for right-to-left, positive for left-to-right
-        long feedRate = 1000; // 0.1mm = 1000 deci-microns
-        if (!isLeftToRight) {
-            feedRate = -feedRate; // Negative for right-to-left cutting
-        }
-        motionControl->setThreadPitch(feedRate, 1);
-        motionControl->startThreading(); // Enable spindle sync
-    } else if (currentMode == MODE_THREAD) {
-        // For threading, use the existing pitch
+    // Enable spindle sync for all cutting operations
+    // (h5.ino uses the same logic for turning and threading)
+    if (currentMode == MODE_TURN || currentMode == MODE_FACE || 
+        currentMode == MODE_THREAD || currentMode == MODE_CUT || 
+        currentMode == MODE_CONE) {
         motionControl->startThreading(); // Enable spindle sync
     }
     
