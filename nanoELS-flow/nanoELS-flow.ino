@@ -248,6 +248,9 @@ void loop() {
     // Real-time spindle tracking (every loop iteration)
     motionControl.updateSpindleTracking();
     
+    // Real-time MPG tracking (every loop iteration)
+    motionControl.updateMPGTracking();
+    
     // Real-time axis motion (every loop iteration)
     for (int axis = 0; axis < 2; axis++) {
       if (motionControl.isAxisEnabled(axis)) {

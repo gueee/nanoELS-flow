@@ -125,8 +125,7 @@ private:
     void leaveStop(int axis, int32_t oldStop);
     int getPitchAxis();  // Returns primary axis for threading (Z for most modes)
     
-    // MPG functions (h5.ino exact approach)
-    void updateMPGTracking();
+    // MPG functions (h5.ino exact approach) - MOVED TO PUBLIC
     int32_t getMPGDelta(int axis);
     
     // Real-time motion functions (for main loop) - MOVED TO PUBLIC
@@ -186,6 +185,9 @@ public:
     // MPG with float interface for OperationManager
     void setMPGStepSize(int axis, float mm);
     float getMPGStepSize(int axis) const;
+    
+    // MPG tracking (h5.ino exact approach)
+    void updateMPGTracking();
     
     // Safety
     void setEmergencyStop(bool stop);
