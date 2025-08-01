@@ -539,8 +539,6 @@ void processKeypadEvent() {
                 break;
               
               case 5:  // Step 6: Start operation
-                // Set state to ready before starting (setupIndex 5 is the final step)
-                operationManager.setStateReady();
                 if (operationManager.startOperation()) {
                   nextionDisplay.showMessage("Operation started");
                   return;  // Exit to prevent prompt overwrite

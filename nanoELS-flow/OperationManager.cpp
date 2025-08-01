@@ -711,7 +711,16 @@ void OperationManager::previousSetupStep() {
 }
 
 bool OperationManager::startOperation() {
-    if (!motionControl || !hasTouchOff() || currentState != STATE_READY) {
+    if (!motionControl || !hasTouchOff()) {
+        return false;
+    }
+    
+    // For pass modes, we should be ready when setup is complete
+    if (isPassMode() && setupIndex == getLastSetupIndex()) {
+        currentState = STATE_READY;
+    }
+    
+    if (currentState != STATE_READY) {
         return false;
     }
     
@@ -787,10 +796,6 @@ void OperationManager::stopOperation() {
     
     // Re-enable manual movement when operation stops
     setArrowKeyMode(ARROW_MOTION_MODE);
-}
-
-void OperationManager::setStateReady() {
-    currentState = STATE_READY;
 }
 
 void OperationManager::pauseOperation() {

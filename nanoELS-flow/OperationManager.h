@@ -271,7 +271,6 @@ public:
     void pauseOperation();    // Pause at safe point
     void resumeOperation();   // Resume from pause
     void advancePass();       // Move to next pass (manual advance)
-    void setStateReady();     // Set state to ready for operation start
     
     // Setup state machine
     void nextSetupStep();     // Advance setup state
