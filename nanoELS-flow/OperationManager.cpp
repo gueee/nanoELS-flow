@@ -737,8 +737,13 @@ bool OperationManager::startOperation() {
         // Set the pitch with the correct sign for motion control
         motionControl->setThreadPitch(absPitch * opDuprSign);
     } else if (currentMode == MODE_THREAD) {
-        // For threading: keep the sign from the pitch (for left/right hand threads)
-        opDuprSign = (motionControl->getDupr() >= 0) ? 1 : -1;
+        // For threading: direction determines thread handedness
+        // L→R = right-hand thread (positive), R→L = left-hand thread (negative)
+        // This matches the physics: spindle rotation direction is constant,
+        // cutting direction determines which way the thread spirals
+        opDuprSign = isLeftToRight ? 1 : -1;
+        // Set the pitch with the correct sign for threading
+        motionControl->setThreadPitch(absPitch * opDuprSign);
     } else {
         opDuprSign = 1; // Default
     }
