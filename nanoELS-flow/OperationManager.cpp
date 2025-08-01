@@ -789,6 +789,10 @@ void OperationManager::stopOperation() {
     setArrowKeyMode(ARROW_MOTION_MODE);
 }
 
+void OperationManager::setStateReady() {
+    currentState = STATE_READY;
+}
+
 void OperationManager::pauseOperation() {
     // TODO: Implement pause functionality
 }
