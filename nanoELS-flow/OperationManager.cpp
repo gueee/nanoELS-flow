@@ -702,6 +702,21 @@ bool OperationManager::startOperation() {
     passSubState = SUBSTATE_MOVE_TO_START;
     currentPass = 0;
     
+    // For turning operations, set appropriate feed rate
+    if (currentMode == MODE_TURN || currentMode == MODE_FACE) {
+        // Use a reasonable feed rate for turning (0.1mm per revolution)
+        // Negative for right-to-left, positive for left-to-right
+        long feedRate = 1000; // 0.1mm = 1000 deci-microns
+        if (!isLeftToRight) {
+            feedRate = -feedRate; // Negative for right-to-left cutting
+        }
+        motionControl->setThreadPitch(feedRate, 1);
+        motionControl->startThreading(); // Enable spindle sync
+    } else if (currentMode == MODE_THREAD) {
+        // For threading, use the existing pitch
+        motionControl->startThreading(); // Enable spindle sync
+    }
+    
     // Save current pitch for consistency
     opDupr = motionControl->getDupr();
     opDuprSign = (opDupr >= 0) ? 1 : -1;
@@ -725,6 +740,9 @@ void OperationManager::stopOperation() {
     if (motionControl) {
         motionControl->setTargetPosition(AXIS_X, motionControl->getAxisPosition(AXIS_X));
         motionControl->setTargetPosition(AXIS_Z, motionControl->getAxisPosition(AXIS_Z));
+        
+        // Disable spindle sync
+        motionControl->stopThreading();
     }
     
     // Re-enable manual movement when operation stops
@@ -838,8 +856,12 @@ bool OperationManager::performCuttingPass() {
                 motionControl->setTargetPosition(AXIS_X, targetX);
                 
                 // Use h5.ino-style spindle following for Z
+                // Use the motion control's position calculation for consistency
                 long spindlePos = motionControl->getSpindlePosition();
-                long deltaZ = posFromSpindle(AXIS_Z, spindlePos - spindleSyncPos, true);
+                long targetZFromSpindle = motionControl->positionFromSpindle(AXIS_Z, spindlePos);
+                
+                // Apply the delta from the sync position
+                long deltaZ = targetZFromSpindle - motionControl->positionFromSpindle(AXIS_Z, spindleSyncPos);
                 targetZ = touchOffZ + deltaZ;
                 
                 // Apply cone ratio if threading (X movement per Z movement)
@@ -882,7 +904,8 @@ bool OperationManager::performCuttingPass() {
             {
                 // X follows spindle for cut-off (plunging towards center)
                 long spindlePos = motionControl->getSpindlePosition();
-                long deltaX = posFromSpindle(AXIS_X, spindlePos - spindleSyncPos, true);
+                long targetXFromSpindle = motionControl->positionFromSpindle(AXIS_X, spindlePos);
+                long deltaX = targetXFromSpindle - motionControl->positionFromSpindle(AXIS_X, spindleSyncPos);
                 
                 // Calculate target diameter (moving towards center)
                 float deltaXMm = stepsToMm(deltaX, AXIS_X);
@@ -910,7 +933,8 @@ bool OperationManager::performCuttingPass() {
             {
                 // Both axes follow spindle with cone ratio
                 long spindlePos = motionControl->getSpindlePosition();
-                long deltaZ = posFromSpindle(AXIS_Z, spindlePos - spindleSyncPos, true);
+                long targetZFromSpindle = motionControl->positionFromSpindle(AXIS_Z, spindlePos);
+                long deltaZ = targetZFromSpindle - motionControl->positionFromSpindle(AXIS_Z, spindleSyncPos);
                 targetZ = touchOffZ + deltaZ;
                 
                 // Calculate X movement based on Z movement and cone ratio
@@ -990,7 +1014,7 @@ void OperationManager::update() {
 void OperationManager::executeNormalMode() {
     // Normal gearbox mode - Z follows spindle
     long spindlePos = motionControl->getSpindlePosition();
-    long targetZ = posFromSpindle(AXIS_Z, spindlePos, true);
+    long targetZ = motionControl->positionFromSpindle(AXIS_Z, spindlePos);
     motionControl->setTargetPosition(AXIS_Z, targetZ);
 }
 
