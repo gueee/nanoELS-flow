@@ -129,15 +129,8 @@ private:
     void updateMPGTracking();
     int32_t getMPGDelta(int axis);
     
-    // Real-time motion functions (for main loop)
-    int32_t positionFromSpindle(int axis, int32_t spindlePos);
-    int32_t spindleFromPosition(int axis, int32_t axisPos);
-    void updateSpindleTracking();
-    void updateAxisMotion(int axis);
-    void processMPGMovement(int axis);
-    
-    // Safe stop application (h5.ino style)
-    void applyPendingStops();
+    // Real-time motion functions (for main loop) - MOVED TO PUBLIC
+    // Safe stop application (h5.ino style) - MOVED TO PUBLIC
     
     // Hardware initialization
     void initializeEncoders();
@@ -216,6 +209,16 @@ public:
     String getStatusReport();
     void printDiagnostics();
     void printMPGDiagnostics();                 // Debug MPG system
+    
+    // Real-time motion functions (for main loop)
+    int32_t positionFromSpindle(int axis, int32_t spindlePos);
+    int32_t spindleFromPosition(int axis, int32_t axisPos);
+    void updateSpindleTracking();
+    void updateAxisMotion(int axis);
+    void processMPGMovement(int axis);
+    
+    // Safe stop application (h5.ino style)
+    void applyPendingStops();
     
     // Utility functions
     float stepsToMM(int axis, int32_t steps);
