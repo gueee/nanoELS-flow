@@ -246,7 +246,7 @@ String OperationManager::formatDupr(long value) {
     return result + "tpi";
 }
 
-String OperationManager::getNumpadDisplayText() {
+String OperationManager::getNumpadDisplayText() const {
     if (!inNumpadInput) {
         return "";
     }

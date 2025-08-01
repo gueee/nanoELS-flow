@@ -7,20 +7,20 @@ CuttingParameters cuttingParams;
 // [Material][ToolType] = base cutting speed
 // Data based on industry standards from Sandvik, Seco, Kennametal, and other manufacturers
 const float CuttingParameters::CUTTING_SPEEDS[MATERIAL_COUNT][TOOL_COUNT] = {
-    //                    HSS    Carbide  Carbide  CBN     Diamond  Ceramic
-    //                    (uncoated) (coated)
-    {MATERIAL_ALUMINUM,     200,   800,    1000,   1500,   2000,    1200},      // Aluminum alloys
-    {MATERIAL_BRASS_BRONZE, 150,   600,    800,    1200,   1500,    900},       // Brass, Bronze, Copper
-    {MATERIAL_MILD_STEEL,   100,   400,    600,    800,    1000,    600},       // Low carbon steel
-    {MATERIAL_MEDIUM_STEEL, 80,    300,    450,    600,    800,    450},        // Medium carbon steel
-    {MATERIAL_HARD_STEEL,   60,    200,    300,    400,    600,    300},        // High carbon steel
-    {MATERIAL_STAINLESS_300, 70,   250,    400,    500,    700,    400},        // Austenitic stainless
-    {MATERIAL_STAINLESS_400, 60,   200,    300,    400,    600,    300},        // Martensitic stainless
-    {MATERIAL_TITANIUM,     40,    150,    200,    300,    400,    200},        // Titanium alloys
-    {MATERIAL_INCONEL,      30,    100,    150,    200,    300,    150},        // Inconel, superalloys
-    {MATERIAL_CAST_IRON,    80,    300,    450,    600,    800,    450},        // Cast iron
-    {MATERIAL_PLASTIC,      300,   1200,   1500,   2000,   2500,   1500},       // Plastics
-    {MATERIAL_WOOD,         500,   2000,   2500,   3000,   4000,   2500}        // Wood
+    //       HSS    Carbide  Carbide  CBN     Diamond  Ceramic
+    //              (uncoated) (coated)
+    {200,   800,    1000,   1500,   2000,    1200},      // Aluminum alloys
+    {150,   600,    800,    1200,   1500,    900},       // Brass, Bronze, Copper
+    {100,   400,    600,    800,    1000,    600},       // Low carbon steel
+    {80,    300,    450,    600,    800,    450},        // Medium carbon steel
+    {60,    200,    300,    400,    600,    300},        // High carbon steel
+    {70,    250,    400,    500,    700,    400},        // Austenitic stainless
+    {60,    200,    300,    400,    600,    300},        // Martensitic stainless
+    {40,    150,    200,    300,    400,    200},        // Titanium alloys
+    {30,    100,    150,    200,    300,    150},        // Inconel, superalloys
+    {80,    300,    450,    600,    800,    450},        // Cast iron
+    {300,   1200,   1500,   2000,   2500,   1500},       // Plastics
+    {500,   2000,   2500,   3000,   4000,   2500}        // Wood
 };
 
 // Diameter factors (multipliers for different diameter ranges)

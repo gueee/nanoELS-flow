@@ -148,6 +148,7 @@ public:
     
     // Threading control (h5.ino style)
     void setThreadPitch(int32_t dupr, int32_t starts = 1);
+    void setStarts(int starts) { spindle.threadStarts = starts; }  // Set thread starts
     void startThreading();
     void stopThreading();
     bool isThreadingActive() { return spindle.threadingActive; }

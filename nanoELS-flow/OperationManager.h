@@ -247,7 +247,7 @@ public:
     void handleNumpadBackspace();          // Legacy function - calls numpadBackspace
     void confirmTouchOffValue();           // Confirm entered coordinate value
     bool isInNumpadInput() const { return inNumpadInput; }
-    String getNumpadDisplayText();         // Get current numpad display text
+    String getNumpadDisplayText() const;   // Get current numpad display text
     
     // Operation setup (original float-based functions)
     void setCutLength(float mm);  // Set Z-axis cut length
