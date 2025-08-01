@@ -715,6 +715,9 @@ bool OperationManager::startOperation() {
         return false;
     }
     
+    // Calculate cut parameters from targets and touch-off
+    calculateOperationParameters();
+    
     // Check required parameters
     if (currentMode != MODE_NORMAL && currentMode != MODE_CONE) {
         if (cutLength == 0 || cutDepth == 0) {
@@ -1590,8 +1593,12 @@ void OperationManager::calculateOperationParameters() {
         cutDepth = mmToSteps(abs(diameterChange) / 2.0f, AXIS_X);  // Radial depth
     }
     
-    // Target length is the distance to cut, not a target position
+    // Target length is the distance to cut
+    // For R→L (negative direction), make length negative
     cutLength = mmToSteps(targetLengthMm, AXIS_Z);
+    if (!isLeftToRight) {
+        cutLength = -cutLength;
+    }
 }
 
 // Display text methods (≤21 characters as requested)
