@@ -151,10 +151,9 @@ void MinimalMotionControl::initializeGPIO() {
 int32_t MinimalMotionControl::positionFromSpindle(int axis, int32_t spindlePos) {
     MinimalAxis& a = axes[axis];
     
-    // Exact h5.ino formula adapted for our 600 PPR encoder
-    // Formula: (spindlePos * motorSteps * threadPitch * threadStarts) / (screwPitch * encoderSteps)
-    int32_t newPos = spindlePos * a.motorSteps * spindle.threadPitch * spindle.threadStarts 
-                     / (a.screwPitch * (int32_t)ENCODER_STEPS_FLOAT);
+    // Exact h5.ino formula: s * motorSteps / screwPitch / ENCODER_STEPS_FLOAT * dupr * starts
+    int32_t newPos = spindlePos * a.motorSteps / a.screwPitch / (int32_t)ENCODER_STEPS_FLOAT 
+                     * spindle.threadPitch * spindle.threadStarts;
     
     // Respect software limits (h5.ino style)
     if (newPos < a.rightStop) newPos = a.rightStop;

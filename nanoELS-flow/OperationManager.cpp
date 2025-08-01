@@ -913,7 +913,9 @@ bool OperationManager::performCuttingPass() {
                 motionControl->setTargetPosition(AXIS_Z, targetZ);
                 
                 // Check if we've reached the cut length
-                if (abs(deltaZ) >= abs(cutLength)) {
+                // For turning operations, check actual Z position vs target
+                long actualZMovement = motionControl->getPosition(AXIS_Z) - touchOffZ;
+                if (abs(actualZMovement) >= abs(cutLength)) {
                     return true;
                 }
             }
