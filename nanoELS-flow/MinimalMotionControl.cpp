@@ -235,8 +235,8 @@ void MinimalMotionControl::updateAxisMotion(int axis) {
     
     if (stepsToGo == 0) {
         a.moving = false;
-        // Decelerate if moving
-        if (a.currentSpeed > a.startSpeed) {
+        // Decelerate if moving (only in manual mode)
+        if (!spindle.threadingActive && a.currentSpeed > a.startSpeed) {
             a.currentSpeed--;
         }
         return;
@@ -244,16 +244,23 @@ void MinimalMotionControl::updateAxisMotion(int axis) {
     
     a.moving = true;
     
-    // Update speed (simple h5.ino ramping)
-    updateSpeed(axis);
-    
-    // Check if it's time for next step
-    uint32_t now = micros();
-    uint32_t stepInterval = 1000000 / a.currentSpeed;  // Convert Hz to microseconds
-    
-    if (now - a.lastStepTime >= stepInterval) {
+    // In spindle-synchronized mode, move immediately without speed limitations
+    if (spindle.threadingActive && spindle.threadPitch != 0 && !mpg[axis].active) {
+        // Spindle-synchronized: move immediately, spindle speed determines feed rate
         generateStepPulse(axis);
-        a.lastStepTime = now;
+        a.lastStepTime = micros();
+    } else {
+        // Manual mode: use speed ramping
+        updateSpeed(axis);
+        
+        // Check if it's time for next step
+        uint32_t now = micros();
+        uint32_t stepInterval = 1000000 / a.currentSpeed;  // Convert Hz to microseconds
+        
+        if (now - a.lastStepTime >= stepInterval) {
+            generateStepPulse(axis);
+            a.lastStepTime = now;
+        }
     }
 }
 
@@ -261,9 +268,11 @@ void MinimalMotionControl::updateAxisMotion(int axis) {
 void MinimalMotionControl::updateSpeed(int axis) {
     MinimalAxis& a = axes[axis];
     
-    // Simple acceleration ramping
+    // Simple acceleration ramping (fixed formula)
     if (a.currentSpeed < a.maxSpeed) {
-        a.currentSpeed += a.acceleration / a.currentSpeed;  // Acceleration curve
+        // Use proper acceleration formula: v = v0 + a*t
+        // Since this is called every update cycle, we use acceleration rate directly
+        a.currentSpeed += a.acceleration / 1000;  // Convert to per-millisecond rate
         if (a.currentSpeed > a.maxSpeed) {
             a.currentSpeed = a.maxSpeed;
         }

@@ -111,6 +111,7 @@ private:
     int32_t spindleFromPosition(int axis, int32_t axisPos);
     void updateSpindleTracking();
     void updateAxisMotion(int axis);
+    void updateAxisMotionSpindleSync(int axis);
     void generateStepPulse(int axis);
     void updateSpeed(int axis);
     
