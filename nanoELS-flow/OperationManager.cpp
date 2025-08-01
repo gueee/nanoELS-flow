@@ -857,21 +857,9 @@ bool OperationManager::moveToStartPosition() {
 bool OperationManager::waitForSpindleSync() {
     if (!motionControl) return false;
     
-    // Calculate target spindle position for synchronization
-    long currentSpindlePos = motionControl->getSpindlePosition();
-    long spindleDiff = currentSpindlePos - spindleSyncPos;
-    
-    // Add start offset for multi-start threads (only for threading mode)
-    if (currentMode == MODE_THREAD && currentPass > 0 && motionControl->getStarts() > 1) {
-        spindleDiff -= startOffset * currentPass;
-    }
-    
-    // Wait for spindle to reach sync position (within 1 encoder count)
-    int encoderSteps = ENCODER_PPR * 2;
-    spindleDiff = spindleDiff % encoderSteps;
-    if (spindleDiff < 0) spindleDiff += encoderSteps;
-    
-    return (spindleDiff < 1 || spindleDiff > encoderSteps - 1);
+    // h5.ino style: Just proceed immediately when spindlePosSync == 0
+    // The spindle sync happens in real-time during cutting, not as a wait state
+    return true;
 }
 
 bool OperationManager::performCuttingPass() {
